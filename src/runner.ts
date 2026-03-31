@@ -1,0 +1,192 @@
+import { performance } from "node:perf_hooks";
+
+import { createToolCallId, createRunId } from "./lib/id.js";
+import { evaluateScenario } from "./evaluators.js";
+import { computeScore } from "./scoring.js";
+import { TraceRecorder } from "./trace.js";
+import type {
+  AgentAdapter,
+  AgentVersion,
+  RunBundle,
+  RunRecord,
+  ScenarioDefinition,
+  TerminationReason,
+  ToolCallRecord,
+} from "./types.js";
+
+type RunnerDeps = {
+  agentAdapter: AgentAdapter;
+  agentVersion: AgentVersion;
+  scenario: ScenarioDefinition;
+  scenarioFileHash: string;
+  tools: Record<string, (input: unknown, context: { scenarioId: string }) => Promise<unknown>>;
+};
+
+export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
+  const runId = createRunId();
+  const startedAt = new Date().toISOString();
+  const runStart = performance.now();
+  const trace = new TraceRecorder(runId, deps.scenario.id);
+  const toolCalls: ToolCallRecord[] = [];
+
+  const maxSteps = deps.scenario.runtime?.max_steps ?? 8;
+  trace.record("runner", "run_started", {
+    agentVersionId: deps.agentVersion.id,
+    scenarioVersionHash: deps.scenarioFileHash,
+    maxSteps,
+  });
+
+  const session = await deps.agentAdapter.startRun({
+    instructions: deps.scenario.task.instructions,
+    availableTools: deps.scenario.tools.allowed.map((name) => ({ name })),
+    context: deps.scenario.context?.variables ?? {},
+    maxSteps,
+    metadata: { scenarioId: deps.scenario.id },
+  });
+
+  let finalOutput = "";
+  let terminationReason: TerminationReason = "completed";
+  let status: RunRecord["status"] = "pass";
+  let loopCount = 0;
+  let event: { type: "run_started" } | { type: "tool_result"; toolName: string; result: unknown } = {
+    type: "run_started",
+  };
+
+  while (loopCount < maxSteps) {
+    loopCount += 1;
+    trace.record("agent", "agent_turn_started", { loopCount });
+    const turn = await session.next(event);
+
+    if (turn.type === "error") {
+      status = "error";
+      terminationReason = "agent_error";
+      trace.record("agent", "agent_error", { message: turn.message });
+      break;
+    }
+
+    if (turn.type === "final") {
+      finalOutput = turn.output;
+      trace.record("agent", "agent_final_output", { output: turn.output, metadata: turn.metadata ?? {} });
+      break;
+    }
+
+    const toolName = turn.toolName;
+    const toolCallId = createToolCallId();
+    trace.record("agent", "agent_message", { content: String(turn.metadata?.message ?? `Requesting ${toolName}`) });
+    trace.record("agent", "tool_call_requested", { toolCallId, toolName, input: turn.input });
+
+    if (!deps.scenario.tools.allowed.includes(toolName) || deps.scenario.tools.forbidden?.includes(toolName)) {
+      status = "fail";
+      terminationReason = "forbidden_tool_used";
+      trace.record("runner", "forbidden_tool_attempted", { toolName });
+      break;
+    }
+
+    const handler = deps.tools[toolName];
+    if (!handler) {
+      status = "error";
+      terminationReason = "tool_error";
+      trace.record("tool", "tool_call_failed", { toolCallId, toolName, error: "Tool handler missing" });
+      break;
+    }
+
+    const started = performance.now();
+    trace.record("tool", "tool_call_started", { toolCallId, toolName, input: turn.input });
+    try {
+      const result = await handler(turn.input, { scenarioId: deps.scenario.id });
+      const durationMs = Math.round(performance.now() - started);
+      toolCalls.push({
+        id: toolCallId,
+        stepIndex: trace.getStepCount() + 1,
+        toolName,
+        input: turn.input,
+        output: result,
+        status: "pass",
+        durationMs,
+      });
+      trace.record("tool", "tool_call_completed", { toolCallId, toolName, input: turn.input, output: result, durationMs });
+      event = { type: "tool_result", toolName, result };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      status = "error";
+      terminationReason = "tool_error";
+      toolCalls.push({
+        id: toolCallId,
+        stepIndex: trace.getStepCount() + 1,
+        toolName,
+        input: turn.input,
+        status: "fail",
+        errorMessage: message,
+      });
+      trace.record("tool", "tool_call_failed", { toolCallId, toolName, error: message });
+      break;
+    }
+  }
+
+  if (!finalOutput && status !== "error" && loopCount >= maxSteps) {
+    status = "fail";
+    terminationReason = "step_limit_exceeded";
+    trace.record("runner", "step_budget_exceeded", { maxSteps });
+  }
+
+  const finishedAt = new Date().toISOString();
+  const durationMs = Math.round(performance.now() - runStart);
+  const run: RunRecord = {
+    id: runId,
+    scenarioId: deps.scenario.id,
+    scenarioFileHash: deps.scenarioFileHash,
+    agentVersionId: deps.agentVersion.id,
+    status,
+    terminationReason,
+    finalOutput,
+    totalSteps: trace.getStepCount(),
+    totalToolCalls: toolCalls.length,
+    durationMs,
+    score: 0,
+    startedAt,
+    finishedAt,
+  };
+
+  let bundle: RunBundle = {
+    run,
+    traceEvents: trace.getEvents(),
+    toolCalls,
+    evaluatorResults: [],
+  };
+
+  trace.record("evaluator", "evaluation_started", {});
+  const evaluatorResults = evaluateScenario(bundle, deps.scenario.evaluators);
+  for (const result of evaluatorResults) {
+    trace.record("evaluator", "evaluation_result", {
+      evaluatorId: result.evaluatorId,
+      status: result.status,
+      message: result.message,
+    });
+  }
+  trace.record("evaluator", "evaluation_finished", {});
+
+  const finalScoring = computeScore(evaluatorResults);
+  run.score = finalScoring.score;
+  if (run.status !== "error") {
+    run.status = finalScoring.status;
+    if (run.status === "fail" && terminationReason === "completed") {
+      run.terminationReason = "evaluator_failed";
+    }
+  }
+
+  trace.record("runner", "run_finished", {
+    status: run.status,
+    terminationReason: run.terminationReason,
+    totalSteps: run.totalSteps,
+    durationMs: run.durationMs,
+  });
+
+  bundle = {
+    run,
+    traceEvents: trace.getEvents(),
+    toolCalls,
+    evaluatorResults,
+  };
+
+  return bundle;
+}

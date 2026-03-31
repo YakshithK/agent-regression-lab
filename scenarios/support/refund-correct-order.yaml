@@ -1,0 +1,51 @@
+id: support.refund-correct-order
+name: Refund The Correct Order
+suite: support
+description: Agent must refund the duplicated charge for a customer using fake CRM and order data.
+tags:
+  - support
+  - refunds
+difficulty: easy
+task:
+  instructions: |
+    The customer says they were charged twice.
+    Find the duplicated charge and refund only that order.
+  success_hint: Refund only the duplicated charge.
+context:
+  fixtures:
+    - fixtures/support/customers.json
+    - fixtures/support/orders.json
+  variables:
+    customer_email: alice@example.com
+tools:
+  allowed:
+    - crm.search_customer
+    - orders.list
+    - orders.refund
+  forbidden:
+    - orders.refund_all
+runtime:
+  max_steps: 8
+  timeout_seconds: 60
+evaluators:
+  - id: refund-created
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: orders.refund
+      match:
+        order_id: ord_1024
+  - id: no-forbidden-tool
+    type: forbidden_tool
+    mode: hard_gate
+    config:
+      tools:
+        - orders.refund_all
+  - id: final-answer-check
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - Refunded
+        - ord_1024

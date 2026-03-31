@@ -1,0 +1,40 @@
+id: support.refund-bob-order
+name: Refund Another Order
+suite: support
+description: Same deterministic refund flow using a different customer fixture.
+tags:
+  - support
+  - refunds
+difficulty: easy
+task:
+  instructions: |
+    The customer says they were charged twice.
+    Find the duplicated charge and refund only that order.
+context:
+  fixtures:
+    - fixtures/support/customers.json
+    - fixtures/support/orders.json
+  variables:
+    customer_email: alice@example.com
+tools:
+  allowed:
+    - crm.search_customer
+    - orders.list
+    - orders.refund
+runtime:
+  max_steps: 8
+evaluators:
+  - id: refund-created
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: orders.refund
+      match:
+        order_id: ord_1024
+  - id: final-answer-check
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - ord_1024

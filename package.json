@@ -1,0 +1,18 @@
+{
+  "name": "agent-regression-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "start": "tsx src/index.ts",
+    "run": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "yaml": "^2.8.3"
+  }
+}

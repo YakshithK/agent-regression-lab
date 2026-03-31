@@ -1,0 +1,25 @@
+[
+  {
+    "id": "ord_1023",
+    "customer_id": "cus_100",
+    "amount": 49,
+    "currency": "USD",
+    "status": "paid",
+    "duplicate_group": "dup_1"
+  },
+  {
+    "id": "ord_1024",
+    "customer_id": "cus_100",
+    "amount": 49,
+    "currency": "USD",
+    "status": "paid",
+    "duplicate_group": "dup_1"
+  },
+  {
+    "id": "ord_2000",
+    "customer_id": "cus_101",
+    "amount": 80,
+    "currency": "USD",
+    "status": "paid"
+  }
+]
