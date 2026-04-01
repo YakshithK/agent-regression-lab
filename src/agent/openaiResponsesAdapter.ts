@@ -138,10 +138,7 @@ export class OpenAIResponsesAgentAdapter implements AgentAdapter {
       throw new Error("OPENAI_API_KEY is required for provider=openai.");
     }
 
-    const model = input.metadata?.model;
-    if (typeof model !== "string" || model.length === 0) {
-      throw new Error("A model must be supplied for provider=openai.");
-    }
+    const model = typeof input.metadata?.model === "string" && input.metadata.model.length > 0 ? input.metadata.model : "gpt-4o-mini";
 
     const client = new OpenAI({ apiKey: this.options.apiKey });
     return new OpenAIResponsesSession(client, model, input);

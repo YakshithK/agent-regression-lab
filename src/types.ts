@@ -186,3 +186,35 @@ export type ScenarioSummary = {
   difficulty?: string;
   description?: string;
 };
+
+export type RunListFilters = {
+  suite?: string;
+  status?: RunStatus;
+  provider?: string;
+};
+
+export type RunListItem = {
+  id: string;
+  scenarioId: string;
+  suite: string;
+  agentVersionId: string;
+  agentLabel?: string;
+  provider?: string;
+  modelId?: string;
+  status: RunStatus;
+  score: number;
+  durationMs: number;
+  totalSteps: number;
+  startedAt: string;
+};
+
+export type RunComparison = {
+  baseline: RunBundle;
+  candidate: RunBundle;
+  notes: string[];
+  deltas: {
+    score: number;
+    runtimeMs: number;
+    steps: number;
+  };
+};

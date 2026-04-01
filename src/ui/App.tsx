@@ -1,0 +1,346 @@
+import React, { useEffect, useState } from "react";
+
+type RunListItem = {
+  id: string;
+  scenarioId: string;
+  suite: string;
+  agentVersionId: string;
+  agentLabel?: string;
+  provider?: string;
+  modelId?: string;
+  status: "pass" | "fail" | "error";
+  score: number;
+  durationMs: number;
+  totalSteps: number;
+  startedAt: string;
+};
+
+type RunDetail = {
+  run: {
+    id: string;
+    scenarioId: string;
+    status: string;
+    score: number;
+    durationMs: number;
+    totalSteps: number;
+    terminationReason: string;
+    finalOutput: string;
+    startedAt: string;
+  };
+  agentVersion?: {
+    provider?: string;
+    modelId?: string;
+    label: string;
+  };
+  evaluatorResults: Array<{ evaluatorId: string; status: string; message: string }>;
+  toolCalls: Array<{ id: string; toolName: string; input: unknown; output?: unknown; status: string }>;
+  traceEvents: Array<{ eventId: string; stepIndex: number; source: string; type: string; payload: Record<string, unknown> }>;
+  errorDetail?: string;
+};
+
+type ComparePayload = {
+  baseline: RunDetail;
+  candidate: RunDetail;
+  notes: string[];
+  deltas: {
+    score: number;
+    runtimeMs: number;
+    steps: number;
+  };
+};
+
+export function App(): React.JSX.Element {
+  const route = getRoute();
+
+  return (
+    <div className="shell">
+      <header className="topbar">
+        <a className="brand" href="/">
+          Agent Regression Lab
+        </a>
+      </header>
+      <main className="page">
+        {route.type === "list" ? <RunListPage /> : null}
+        {route.type === "detail" ? <RunDetailPage runId={route.runId} /> : null}
+        {route.type === "compare" ? <ComparePage baseline={route.baseline} candidate={route.candidate} /> : null}
+      </main>
+    </div>
+  );
+}
+
+function RunListPage(): React.JSX.Element {
+  const [runs, setRuns] = useState<RunListItem[]>([]);
+  const [suite, setSuite] = useState("");
+  const [status, setStatus] = useState("");
+  const [provider, setProvider] = useState("");
+
+  useEffect(() => {
+    const url = new URL("/api/runs", window.location.origin);
+    if (suite) url.searchParams.set("suite", suite);
+    if (status) url.searchParams.set("status", status);
+    if (provider) url.searchParams.set("provider", provider);
+
+    void fetch(url)
+      .then((response) => response.json())
+      .then((data) => setRuns(Array.isArray(data.runs) ? data.runs : []));
+  }, [suite, status, provider]);
+
+  return (
+    <section>
+      <div className="hero">
+        <h1>Runs</h1>
+        <p>Inspect recent runs, filter failures, and jump into comparisons.</p>
+      </div>
+      <div className="filters">
+        <input value={suite} onChange={(event) => setSuite(event.target.value)} placeholder="Suite" />
+        <select value={status} onChange={(event) => setStatus(event.target.value)}>
+          <option value="">All statuses</option>
+          <option value="pass">Pass</option>
+          <option value="fail">Fail</option>
+          <option value="error">Error</option>
+        </select>
+        <select value={provider} onChange={(event) => setProvider(event.target.value)}>
+          <option value="">All providers</option>
+          <option value="mock">Mock</option>
+          <option value="openai">OpenAI</option>
+        </select>
+      </div>
+      {runs.length === 0 ? <EmptyState title="No runs yet" description="Run a scenario from the CLI to populate the lab." /> : null}
+      {runs.length > 0 ? (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Run</th>
+              <th>Scenario</th>
+              <th>Provider</th>
+              <th>Status</th>
+              <th>Score</th>
+              <th>Runtime</th>
+              <th>Steps</th>
+              <th>Started</th>
+            </tr>
+          </thead>
+          <tbody>
+            {runs.map((run, index) => (
+              <tr key={run.id}>
+                <td>
+                  <a href={`/runs/${run.id}`}>{run.id}</a>
+                </td>
+                <td>{run.scenarioId}</td>
+                <td>
+                  {run.provider ?? "-"}
+                  <div className="muted">{run.modelId ?? run.agentLabel ?? ""}</div>
+                </td>
+                <td>
+                  <span className={`pill ${run.status}`}>{run.status}</span>
+                </td>
+                <td>{run.score}</td>
+                <td>{run.durationMs}ms</td>
+                <td>{run.totalSteps}</td>
+                <td>
+                  {new Date(run.startedAt).toLocaleString()}
+                  {index > 0 && runs[index - 1].scenarioId === run.scenarioId ? (
+                    <div className="muted">
+                      <a href={`/compare?baseline=${runs[index - 1].id}&candidate=${run.id}`}>compare previous</a>
+                    </div>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+    </section>
+  );
+}
+
+function RunDetailPage(props: { runId: string }): React.JSX.Element {
+  const [detail, setDetail] = useState<RunDetail | null>(null);
+
+  useEffect(() => {
+    void fetch(`/api/runs/${props.runId}`)
+      .then((response) => response.json())
+      .then((data) => setDetail(data as RunDetail));
+  }, [props.runId]);
+
+  if (!detail) {
+    return <EmptyState title="Loading run" description="Fetching run detail from the local lab." />;
+  }
+
+  return (
+    <section>
+      <div className="hero">
+        <h1>{detail.run.id}</h1>
+        <p>{detail.run.scenarioId}</p>
+      </div>
+      <div className="stats">
+        <Stat label="Status" value={<span className={`pill ${detail.run.status}`}>{detail.run.status}</span>} />
+        <Stat label="Score" value={detail.run.score} />
+        <Stat label="Runtime" value={`${detail.run.durationMs}ms`} />
+        <Stat label="Steps" value={detail.run.totalSteps} />
+      </div>
+      <div className="panel-grid">
+        <section className="panel">
+          <h2>Summary</h2>
+          <p><strong>Provider:</strong> {detail.agentVersion?.provider ?? "-"}</p>
+          <p><strong>Model:</strong> {detail.agentVersion?.modelId ?? "-"}</p>
+          <p><strong>Termination:</strong> {detail.run.terminationReason}</p>
+          {detail.errorDetail ? <p><strong>Error:</strong> {detail.errorDetail}</p> : null}
+          <p><strong>Final output:</strong></p>
+          <pre>{detail.run.finalOutput || "(none)"}</pre>
+        </section>
+        <section className="panel">
+          <h2>Evaluators</h2>
+          <ul className="stack">
+            {detail.evaluatorResults.map((result) => (
+              <li key={result.evaluatorId}>
+                <span className={`pill ${result.status}`}>{result.status}</span> {result.evaluatorId}
+                <div className="muted">{result.message}</div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+      <section className="panel">
+        <h2>Tool Calls</h2>
+        {detail.toolCalls.length === 0 ? <p className="muted">No tool calls recorded.</p> : null}
+        <ul className="stack">
+          {detail.toolCalls.map((call) => (
+            <li key={call.id}>
+              <strong>{call.toolName}</strong> <span className={`pill ${call.status}`}>{call.status}</span>
+              <pre>{JSON.stringify({ input: call.input, output: call.output }, null, 2)}</pre>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className="panel">
+        <h2>Trace</h2>
+        <ol className="timeline">
+          {detail.traceEvents.map((event) => (
+            <li key={event.eventId}>
+              <div>
+                <strong>{event.stepIndex}. {event.type}</strong> <span className="muted">{event.source}</span>
+              </div>
+              <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+            </li>
+          ))}
+        </ol>
+      </section>
+    </section>
+  );
+}
+
+function ComparePage(props: { baseline?: string; candidate?: string }): React.JSX.Element {
+  const [data, setData] = useState<ComparePayload | null>(null);
+
+  useEffect(() => {
+    if (!props.baseline || !props.candidate) {
+      setData(null);
+      return;
+    }
+    const url = new URL("/api/compare", window.location.origin);
+    url.searchParams.set("baseline", props.baseline);
+    url.searchParams.set("candidate", props.candidate);
+    void fetch(url)
+      .then((response) => response.json())
+      .then((payload) => setData(payload as ComparePayload));
+  }, [props.baseline, props.candidate]);
+
+  if (!props.baseline || !props.candidate) {
+    return <EmptyState title="No comparison selected" description="Open the compare page with baseline and candidate run ids." />;
+  }
+
+  if (!data) {
+    return <EmptyState title="Loading comparison" description="Fetching both runs and computing deltas." />;
+  }
+
+  return (
+    <section>
+      <div className="hero">
+        <h1>Compare</h1>
+        <p>{data.baseline.run.scenarioId}</p>
+      </div>
+      <div className="stats">
+        <Stat label="Score delta" value={signed(data.deltas.score)} />
+        <Stat label="Runtime delta" value={`${signed(data.deltas.runtimeMs)}ms`} />
+        <Stat label="Step delta" value={signed(data.deltas.steps)} />
+      </div>
+      <section className="panel">
+        <h2>Notes</h2>
+        {data.notes.length === 0 ? <p className="muted">No material differences recorded.</p> : null}
+        <ul className="stack">
+          {data.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      </section>
+      <div className="compare-grid">
+        <RunSide title="Baseline" detail={data.baseline} />
+        <RunSide title="Candidate" detail={data.candidate} />
+      </div>
+    </section>
+  );
+}
+
+function RunSide(props: { title: string; detail: RunDetail }): React.JSX.Element {
+  return (
+    <section className="panel">
+      <h2>{props.title}</h2>
+      <p><strong>Run:</strong> <a href={`/runs/${props.detail.run.id}`}>{props.detail.run.id}</a></p>
+      <p><strong>Status:</strong> <span className={`pill ${props.detail.run.status}`}>{props.detail.run.status}</span></p>
+      <p><strong>Score:</strong> {props.detail.run.score}</p>
+      <p><strong>Runtime:</strong> {props.detail.run.durationMs}ms</p>
+      {props.detail.errorDetail ? <p><strong>Error:</strong> {props.detail.errorDetail}</p> : null}
+      <p><strong>Final output:</strong></p>
+      <pre>{props.detail.run.finalOutput || "(none)"}</pre>
+      <h3>Trace</h3>
+      <ol className="timeline compact">
+        {props.detail.traceEvents.map((event) => (
+          <li key={event.eventId}>
+            <strong>{event.stepIndex}. {event.type}</strong>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function Stat(props: { label: string; value: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="stat">
+      <div className="muted">{props.label}</div>
+      <div className="stat-value">{props.value}</div>
+    </div>
+  );
+}
+
+function EmptyState(props: { title: string; description: string }): React.JSX.Element {
+  return (
+    <section className="empty">
+      <h1>{props.title}</h1>
+      <p>{props.description}</p>
+    </section>
+  );
+}
+
+function signed(value: number): string {
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+function getRoute():
+  | { type: "list" }
+  | { type: "detail"; runId: string }
+  | { type: "compare"; baseline?: string; candidate?: string } {
+  const url = new URL(window.location.href);
+  if (url.pathname.startsWith("/runs/")) {
+    return { type: "detail", runId: decodeURIComponent(url.pathname.slice("/runs/".length)) };
+  }
+  if (url.pathname === "/compare") {
+    return {
+      type: "compare",
+      baseline: url.searchParams.get("baseline") ?? undefined,
+      candidate: url.searchParams.get("candidate") ?? undefined,
+    };
+  }
+  return { type: "list" };
+}

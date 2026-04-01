@@ -1,8 +1,10 @@
 import { createAgentFactory } from "./agent/factory.js";
+import { getRunErrorDetail } from "./runOutput.js";
 import { runScenario } from "./runner.js";
 import { listScenarios, loadScenarioById, loadScenariosBySuite } from "./scenarios.js";
 import { Storage } from "./storage.js";
 import { createToolRegistry } from "./tools.js";
+import { startUiServer } from "./ui/server.js";
 import type { AgentRuntimeConfig, RunBundle } from "./types.js";
 
 async function main(): Promise<void> {
@@ -22,7 +24,7 @@ async function main(): Promise<void> {
       handleCompare(args);
       return;
     case "ui":
-      console.log("UI is not implemented yet. Use `show` and `compare` for local inspection.");
+      await startUiServer();
       return;
     default:
       printUsage();
@@ -179,9 +181,9 @@ function handleCompare(args: string[]): void {
 
   const storage = new Storage();
   const comparison = storage.compareRuns(baselineRunId, candidateRunId);
-  console.log(`Scenario: ${comparison.baseline.scenarioId}`);
-  console.log(`Baseline: ${comparison.baseline.id} (${comparison.baseline.status.toUpperCase()} ${comparison.baseline.score}/100)`);
-  console.log(`Candidate: ${comparison.candidate.id} (${comparison.candidate.status.toUpperCase()} ${comparison.candidate.score}/100)`);
+  console.log(`Scenario: ${comparison.baseline.run.scenarioId}`);
+  console.log(`Baseline: ${comparison.baseline.run.id} (${comparison.baseline.run.status.toUpperCase()} ${comparison.baseline.run.score}/100)`);
+  console.log(`Candidate: ${comparison.candidate.run.id} (${comparison.candidate.run.status.toUpperCase()} ${comparison.candidate.run.score}/100)`);
   console.log("Changes:");
   if (comparison.notes.length === 0) {
     console.log("- No material changes.");
@@ -244,29 +246,11 @@ function validateRuntimeConfig(config: AgentRuntimeConfig): AgentRuntimeConfig {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error("OPENAI_API_KEY is required when --provider openai is used.");
     }
-    if (!config.model) {
-      throw new Error("--model is required when --provider openai is used.");
-    }
+    config.model = config.model ?? "gpt-4o-mini";
   }
 
   return config;
 }
-
-function getRunErrorDetail(bundle: RunBundle): string | undefined {
-  for (const event of [...bundle.traceEvents].reverse()) {
-    if (event.type === "agent_error") {
-      const message = event.payload.message;
-      return typeof message === "string" ? message : undefined;
-    }
-    if (event.type === "tool_call_failed") {
-      const error = event.payload.error;
-      return typeof error === "string" ? error : undefined;
-    }
-  }
-
-  return undefined;
-}
-
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;

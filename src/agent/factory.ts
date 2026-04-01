@@ -29,7 +29,7 @@ class OpenAIAdapterFactory implements AgentAdapterFactory {
   }
 
   createVersion(config: AgentRuntimeConfig): AgentVersion {
-    const model = config.model ?? "unknown-model";
+    const model = config.model ?? "gpt-4o-mini";
     const label = config.label ?? `openai-${model}`;
     const payload = { provider: "openai", model };
     return {

@@ -3,7 +3,16 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { ensureParentDir } from "./lib/fs.js";
-import type { AgentVersion, RunBundle, RunRecord, ScenarioDefinition, ScenarioSummary } from "./types.js";
+import type {
+  AgentVersion,
+  RunBundle,
+  RunComparison,
+  RunListFilters,
+  RunListItem,
+  RunRecord,
+  ScenarioDefinition,
+  ScenarioSummary,
+} from "./types.js";
 
 const DB_PATH = resolve("artifacts", "agentlab.db");
 
@@ -235,6 +244,39 @@ export class Storage {
     this.writeTraceArtifact(bundle.run.id, bundle.traceEvents);
   }
 
+  listRuns(filters: RunListFilters = {}): RunListItem[] {
+    const clauses: string[] = [];
+    const values: Array<string> = [];
+
+    if (filters.suite) {
+      clauses.push("s.suite = ?");
+      values.push(filters.suite);
+    }
+    if (filters.status) {
+      clauses.push("r.status = ?");
+      values.push(filters.status);
+    }
+    if (filters.provider) {
+      clauses.push("av.provider = ?");
+      values.push(filters.provider);
+    }
+
+    const whereClause = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    return this.db
+      .prepare(
+        `SELECT r.id, r.scenario_id as scenarioId, s.suite, r.agent_version_id as agentVersionId,
+                av.label as agentLabel, av.provider, av.model_id as modelId,
+                r.status, r.score, r.duration_ms as durationMs, r.total_steps as totalSteps,
+                r.started_at as startedAt
+         FROM runs r
+         JOIN scenarios s ON s.id = r.scenario_id
+         JOIN agent_versions av ON av.id = r.agent_version_id
+         ${whereClause}
+         ORDER BY r.started_at DESC`,
+      )
+      .all(...values) as RunListItem[];
+  }
+
   getRun(runId: string): RunBundle | null {
     const run = this.getRunRecord(runId);
     if (!run) {
@@ -318,33 +360,45 @@ export class Storage {
     };
   }
 
-  compareRuns(baselineRunId: string, candidateRunId: string): {
-    baseline: RunRecord;
-    candidate: RunRecord;
-    notes: string[];
-  } {
-    const baseline = this.getRunRecordOrThrow(baselineRunId);
-    const candidate = this.getRunRecordOrThrow(candidateRunId);
+  compareRuns(baselineRunId: string, candidateRunId: string): RunComparison {
+    const baseline = this.getRun(baselineRunId);
+    const candidate = this.getRun(candidateRunId);
 
-    if (baseline.scenarioId !== candidate.scenarioId) {
+    if (!baseline) {
+      throw new Error(`Run '${baselineRunId}' not found.`);
+    }
+    if (!candidate) {
+      throw new Error(`Run '${candidateRunId}' not found.`);
+    }
+
+    if (baseline.run.scenarioId !== candidate.run.scenarioId) {
       throw new Error("Runs can only be compared when they share the same scenario id.");
     }
 
     const notes: string[] = [];
-    if (baseline.status !== candidate.status) {
-      notes.push(`Verdict changed: ${baseline.status} -> ${candidate.status}`);
+    if (baseline.run.status !== candidate.run.status) {
+      notes.push(`Verdict changed: ${baseline.run.status} -> ${candidate.run.status}`);
     }
-    if (baseline.score !== candidate.score) {
-      notes.push(`Score changed: ${baseline.score} -> ${candidate.score}`);
+    if (baseline.run.score !== candidate.run.score) {
+      notes.push(`Score changed: ${baseline.run.score} -> ${candidate.run.score}`);
     }
-    if (baseline.totalSteps !== candidate.totalSteps) {
-      notes.push(`Steps changed: ${baseline.totalSteps} -> ${candidate.totalSteps}`);
+    if (baseline.run.totalSteps !== candidate.run.totalSteps) {
+      notes.push(`Steps changed: ${baseline.run.totalSteps} -> ${candidate.run.totalSteps}`);
     }
-    if (baseline.durationMs !== candidate.durationMs) {
-      notes.push(`Runtime changed: ${baseline.durationMs}ms -> ${candidate.durationMs}ms`);
+    if (baseline.run.durationMs !== candidate.run.durationMs) {
+      notes.push(`Runtime changed: ${baseline.run.durationMs}ms -> ${candidate.run.durationMs}ms`);
     }
 
-    return { baseline, candidate, notes };
+    return {
+      baseline,
+      candidate,
+      notes,
+      deltas: {
+        score: candidate.run.score - baseline.run.score,
+        runtimeMs: candidate.run.durationMs - baseline.run.durationMs,
+        steps: candidate.run.totalSteps - baseline.run.totalSteps,
+      },
+    };
   }
 
   private getRunRecord(runId: string): RunRecord | null {
