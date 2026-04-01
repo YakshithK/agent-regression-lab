@@ -31,9 +31,42 @@ function loadFixture<T>(path: string): T {
 
 export function getToolSpecs(): ToolSpec[] {
   return [
-    { name: "crm.search_customer", description: "Find a customer by email." },
-    { name: "orders.list", description: "List orders for a given customer id." },
-    { name: "orders.refund", description: "Refund a single order by id." },
+    {
+      name: "crm.search_customer",
+      description: "Find a customer by email.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          email: { type: "string", description: "Customer email address." },
+        },
+        required: ["email"],
+      },
+    },
+    {
+      name: "orders.list",
+      description: "List orders for a given customer id.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          customer_id: { type: "string", description: "Customer id returned from CRM." },
+        },
+        required: ["customer_id"],
+      },
+    },
+    {
+      name: "orders.refund",
+      description: "Refund a single order by id.",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          order_id: { type: "string", description: "Order id to refund." },
+        },
+        required: ["order_id"],
+      },
+    },
   ];
 }
 

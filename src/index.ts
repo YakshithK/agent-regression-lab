@@ -1,10 +1,9 @@
-import { MockAgentAdapter } from "./agent/mockAdapter.js";
-import { createAgentVersionId } from "./lib/id.js";
+import { createAgentFactory } from "./agent/factory.js";
 import { runScenario } from "./runner.js";
 import { listScenarios, loadScenarioById, loadScenariosBySuite } from "./scenarios.js";
 import { Storage } from "./storage.js";
 import { createToolRegistry } from "./tools.js";
-import type { AgentVersion, RunBundle } from "./types.js";
+import type { AgentRuntimeConfig, RunBundle } from "./types.js";
 
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
@@ -33,8 +32,8 @@ async function main(): Promise<void> {
 function printUsage(): void {
   console.log(`Usage:
   agentlab list scenarios
-  agentlab run <scenario-id>
-  agentlab run --suite <suite-id>
+  agentlab run <scenario-id> [--provider mock|openai] [--model <model>] [--agent-label <label>]
+  agentlab run --suite <suite-id> [--provider mock|openai] [--model <model>] [--agent-label <label>]
   agentlab show <run-id>
   agentlab compare <baseline-run-id> <candidate-run-id>
   agentlab ui`);
@@ -52,8 +51,11 @@ function handleList(args: string[]): void {
 }
 
 async function handleRun(args: string[]): Promise<void> {
-  if (args[0] === "--suite") {
-    const suite = args[1];
+  const parsed = parseRunArgs(args);
+  const runtimeConfig = validateRuntimeConfig(parsed.runtimeConfig);
+
+  if (parsed.suite) {
+    const suite = parsed.suite;
     if (!suite) {
       throw new Error("Missing suite id.");
     }
@@ -65,7 +67,7 @@ async function handleRun(args: string[]): Promise<void> {
 
     const runs: RunBundle[] = [];
     for (const scenario of scenarios) {
-      runs.push(await executeOne(scenario.definition.id));
+      runs.push(await executeOne(scenario.definition.id, runtimeConfig));
     }
 
     const passed = runs.filter((bundle) => bundle.run.status === "pass").length;
@@ -81,15 +83,15 @@ async function handleRun(args: string[]): Promise<void> {
     return;
   }
 
-  const scenarioId = args[0];
+  const scenarioId = parsed.scenarioId;
   if (!scenarioId) {
     throw new Error("Missing scenario id.");
   }
 
-  await executeOne(scenarioId);
+  await executeOne(scenarioId, runtimeConfig);
 }
 
-async function executeOne(scenarioId: string): Promise<RunBundle> {
+async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig): Promise<RunBundle> {
   const storage = new Storage();
   const loaded = loadScenarioById(scenarioId);
   storage.upsertScenario(
@@ -105,11 +107,12 @@ async function executeOne(scenarioId: string): Promise<RunBundle> {
     loaded.fileHash,
   );
 
-  const agentVersion = createAgentVersion();
+  const factory = createAgentFactory(runtimeConfig);
+  const agentVersion = factory.createVersion(runtimeConfig);
   storage.upsertAgentVersion(agentVersion);
 
   const bundle = await runScenario({
-    agentAdapter: new MockAgentAdapter(),
+    agentAdapter: factory.createAdapter(),
     agentVersion,
     scenario: loaded.definition,
     scenarioFileHash: loaded.fileHash,
@@ -129,6 +132,10 @@ function printRunSummary(bundle: RunBundle): void {
   console.log(`Runtime: ${bundle.run.durationMs}ms`);
   if (bundle.run.status !== "pass") {
     console.log(`Reason: ${bundle.run.terminationReason}`);
+    const errorDetail = getRunErrorDetail(bundle);
+    if (errorDetail) {
+      console.log(`Error: ${errorDetail}`);
+    }
   }
 }
 
@@ -148,7 +155,15 @@ function handleShow(args: string[]): void {
   console.log(`Scenario: ${bundle.run.scenarioId}`);
   console.log(`Status: ${bundle.run.status.toUpperCase()}`);
   console.log(`Score: ${bundle.run.score}/100`);
+  if (bundle.agentVersion) {
+    console.log(`Provider: ${bundle.agentVersion.provider ?? "unknown"}`);
+    console.log(`Model: ${bundle.agentVersion.modelId ?? "unknown"}`);
+  }
   console.log(`Termination: ${bundle.run.terminationReason}`);
+  const errorDetail = getRunErrorDetail(bundle);
+  if (errorDetail) {
+    console.log(`Error: ${errorDetail}`);
+  }
   console.log(`Final output: ${bundle.run.finalOutput}`);
   console.log("Evaluators:");
   for (const result of bundle.evaluatorResults) {
@@ -178,16 +193,78 @@ function handleCompare(args: string[]): void {
   }
 }
 
-function createAgentVersion(): AgentVersion {
-  const label = "mock-support-agent-v1";
-  const config = { adapter: "mock", domain: "support" };
-  return {
-    id: createAgentVersionId(label, config),
-    label,
-    modelId: "mock-model",
-    provider: "local",
-    config,
-  };
+function parseRunArgs(args: string[]): {
+  scenarioId?: string;
+  suite?: string;
+  runtimeConfig: AgentRuntimeConfig;
+} {
+  const runtimeConfig: AgentRuntimeConfig = { provider: "mock" };
+  let scenarioId: string | undefined;
+  let suite: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--suite") {
+      suite = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--provider") {
+      const provider = args[index + 1];
+      if (provider !== "mock" && provider !== "openai") {
+        throw new Error(`Unsupported provider '${String(provider)}'.`);
+      }
+      runtimeConfig.provider = provider;
+      index += 1;
+      continue;
+    }
+    if (arg === "--model") {
+      runtimeConfig.model = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--agent-label") {
+      runtimeConfig.label = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (!scenarioId) {
+      scenarioId = arg;
+      continue;
+    }
+
+    throw new Error(`Unexpected argument '${arg}'.`);
+  }
+
+  return { scenarioId, suite, runtimeConfig };
+}
+
+function validateRuntimeConfig(config: AgentRuntimeConfig): AgentRuntimeConfig {
+  if (config.provider === "openai") {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error("OPENAI_API_KEY is required when --provider openai is used.");
+    }
+    if (!config.model) {
+      throw new Error("--model is required when --provider openai is used.");
+    }
+  }
+
+  return config;
+}
+
+function getRunErrorDetail(bundle: RunBundle): string | undefined {
+  for (const event of [...bundle.traceEvents].reverse()) {
+    if (event.type === "agent_error") {
+      const message = event.payload.message;
+      return typeof message === "string" ? message : undefined;
+    }
+    if (event.type === "tool_call_failed") {
+      const error = event.payload.error;
+      return typeof error === "string" ? error : undefined;
+    }
+  }
+
+  return undefined;
 }
 
 main().catch((error) => {

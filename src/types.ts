@@ -66,6 +66,12 @@ export type AgentVersion = {
   config: Record<string, unknown>;
 };
 
+export type AgentRuntimeConfig = {
+  provider: "mock" | "openai";
+  model?: string;
+  label?: string;
+};
+
 export type AgentRunInput = {
   instructions: string;
   availableTools: ToolSpec[];
@@ -91,6 +97,11 @@ export interface AgentSession {
 export interface AgentAdapter {
   startRun(input: AgentRunInput): Promise<AgentSession>;
 }
+
+export type AgentAdapterFactory = {
+  createAdapter(): AgentAdapter;
+  createVersion(config: AgentRuntimeConfig): AgentVersion;
+};
 
 export type TraceEvent = {
   eventId: string;
@@ -165,6 +176,7 @@ export type RunBundle = {
   traceEvents: TraceEvent[];
   toolCalls: ToolCallRecord[];
   evaluatorResults: EvaluatorResult[];
+  agentVersion?: AgentVersion;
 };
 
 export type ScenarioSummary = {

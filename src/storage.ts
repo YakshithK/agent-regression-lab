@@ -294,7 +294,28 @@ export class Storage {
         details: row.details_json ? JSON.parse(row.details_json) : undefined,
       }));
 
-    return { run, traceEvents, toolCalls, evaluatorResults };
+    const agentVersion = this.db
+      .prepare(
+        `SELECT id, label, model_id as modelId, provider, config_json
+         FROM agent_versions WHERE id = ?`,
+      )
+      .get(run.agentVersionId) as { id: string; label: string; modelId?: string; provider?: string; config_json: string } | undefined;
+
+    return {
+      run,
+      traceEvents,
+      toolCalls,
+      evaluatorResults,
+      agentVersion: agentVersion
+        ? {
+            id: agentVersion.id,
+            label: agentVersion.label,
+            modelId: agentVersion.modelId ?? undefined,
+            provider: agentVersion.provider ?? undefined,
+            config: JSON.parse(agentVersion.config_json),
+          }
+        : undefined,
+    };
   }
 
   compareRuns(baselineRunId: string, candidateRunId: string): {

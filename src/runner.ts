@@ -4,6 +4,7 @@ import { createToolCallId, createRunId } from "./lib/id.js";
 import { evaluateScenario } from "./evaluators.js";
 import { computeScore } from "./scoring.js";
 import { TraceRecorder } from "./trace.js";
+import { getToolSpecs } from "./tools.js";
 import type {
   AgentAdapter,
   AgentVersion,
@@ -32,16 +33,24 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
   const maxSteps = deps.scenario.runtime?.max_steps ?? 8;
   trace.record("runner", "run_started", {
     agentVersionId: deps.agentVersion.id,
+    provider: deps.agentVersion.provider ?? "unknown",
+    modelId: deps.agentVersion.modelId ?? "unknown",
     scenarioVersionHash: deps.scenarioFileHash,
     maxSteps,
   });
 
+  const availableTools = getToolSpecs().filter((tool) => deps.scenario.tools.allowed.includes(tool.name));
+
   const session = await deps.agentAdapter.startRun({
     instructions: deps.scenario.task.instructions,
-    availableTools: deps.scenario.tools.allowed.map((name) => ({ name })),
+    availableTools,
     context: deps.scenario.context?.variables ?? {},
     maxSteps,
-    metadata: { scenarioId: deps.scenario.id },
+    metadata: {
+      scenarioId: deps.scenario.id,
+      provider: deps.agentVersion.provider,
+      model: deps.agentVersion.modelId,
+    },
   });
 
   let finalOutput = "";
