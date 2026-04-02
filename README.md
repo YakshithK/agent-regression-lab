@@ -52,6 +52,28 @@ npm run start -- ui
 
 The UI starts on `http://127.0.0.1:4173`.
 
+## Installable CLI
+
+The package can be installed as a Node CLI.
+
+Local development install:
+
+```bash
+npm install
+npm run build
+npm link
+agentlab --help
+```
+
+Packed or published install:
+
+```bash
+npm install -g agent-regression-lab
+agentlab --help
+```
+
+The CLI operates on the current working directory. Run it from the root of a project that contains `scenarios/`, `fixtures/`, and optional `agentlab.config.yaml`.
+
 ## CLI
 
 ```text

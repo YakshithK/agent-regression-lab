@@ -1,17 +1,23 @@
+#!/usr/bin/env node
 import { createAgentFactory } from "./agent/factory.js";
 import { getAgentRegistration } from "./config.js";
 import { getRunErrorDetail } from "./runOutput.js";
-import { runScenario } from "./runner.js";
-import { listScenarios, loadScenarioById, loadScenariosBySuite } from "./scenarios.js";
-import { Storage } from "./storage.js";
-import { loadToolRegistry, loadToolSpecs } from "./tools.js";
-import { startUiServer } from "./ui/server.js";
 import type { AgentRuntimeConfig, RunBundle } from "./types.js";
 
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
 
   switch (command) {
+    case "help":
+    case "--help":
+    case "-h":
+      printUsage();
+      return;
+    case "version":
+    case "--version":
+    case "-v":
+      printVersion();
+      return;
     case "list":
       await handleList(args);
       return;
@@ -19,13 +25,13 @@ async function main(): Promise<void> {
       await handleRun(args);
       return;
     case "show":
-      handleShow(args);
+      await handleShow(args);
       return;
     case "compare":
-      handleCompare(args);
+      await handleCompare(args);
       return;
     case "ui":
-      await startUiServer();
+      await handleUi();
       return;
     default:
       printUsage();
@@ -35,11 +41,17 @@ async function main(): Promise<void> {
 function printUsage(): void {
   console.log(`Usage:
   agentlab list scenarios
-  agentlab run <scenario-id> [--agent <name>] [--provider mock|openai] [--model <model>] [--agent-label <label>]
-  agentlab run --suite <suite-id> [--agent <name>] [--provider mock|openai] [--model <model>] [--agent-label <label>]
+  agentlab run <scenario-id> [--agent <name>] [--provider mock|openai|external_process] [--model <model>] [--agent-label <label>]
+  agentlab run --suite <suite-id> [--agent <name>] [--provider mock|openai|external_process] [--model <model>] [--agent-label <label>]
   agentlab show <run-id>
   agentlab compare <baseline-run-id> <candidate-run-id>
-  agentlab ui`);
+  agentlab ui
+  agentlab help
+  agentlab version`);
+}
+
+function printVersion(): void {
+  console.log("0.1.0");
 }
 
 async function handleList(args: string[]): Promise<void> {
@@ -48,6 +60,7 @@ async function handleList(args: string[]): Promise<void> {
     return;
   }
 
+  const { listScenarios } = await import("./scenarios.js");
   for (const scenario of listScenarios()) {
     console.log(`${scenario.id}\t${scenario.suite}\t${scenario.difficulty ?? "-"}\t${scenario.description ?? ""}`);
   }
@@ -56,6 +69,7 @@ async function handleList(args: string[]): Promise<void> {
 async function handleRun(args: string[]): Promise<void> {
   const parsed = parseRunArgs(args);
   const runtimeConfig = validateRuntimeConfig(parsed.runtimeConfig);
+  const { loadScenariosBySuite } = await import("./scenarios.js");
 
   if (parsed.suite) {
     const suite = parsed.suite;
@@ -95,6 +109,12 @@ async function handleRun(args: string[]): Promise<void> {
 }
 
 async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig): Promise<RunBundle> {
+  const [{ Storage }, { loadToolRegistry, loadToolSpecs }, { loadScenarioById }, { runScenario }] = await Promise.all([
+    import("./storage.js"),
+    import("./tools.js"),
+    import("./scenarios.js"),
+    import("./runner.js"),
+  ]);
   const storage = new Storage();
   const toolSpecs = await loadToolSpecs();
   const toolRegistry = await loadToolRegistry();
@@ -131,6 +151,11 @@ async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig)
   return bundle;
 }
 
+async function handleUi(): Promise<void> {
+  const { startUiServer } = await import("./ui/server.js");
+  await startUiServer();
+}
+
 function printRunSummary(bundle: RunBundle): void {
   console.log(`Run: ${bundle.run.id}`);
   console.log(`Scenario: ${bundle.run.scenarioId}`);
@@ -156,12 +181,13 @@ function printRunSummary(bundle: RunBundle): void {
   }
 }
 
-function handleShow(args: string[]): void {
+async function handleShow(args: string[]): Promise<void> {
   const runId = args[0];
   if (!runId) {
     throw new Error("Missing run id.");
   }
 
+  const { Storage } = await import("./storage.js");
   const storage = new Storage();
   const bundle = storage.getRun(runId);
   if (!bundle) {
@@ -191,12 +217,13 @@ function handleShow(args: string[]): void {
   }
 }
 
-function handleCompare(args: string[]): void {
+async function handleCompare(args: string[]): Promise<void> {
   const [baselineRunId, candidateRunId] = args;
   if (!baselineRunId || !candidateRunId) {
     throw new Error("Missing baseline or candidate run id.");
   }
 
+  const { Storage } = await import("./storage.js");
   const storage = new Storage();
   const comparison = storage.compareRuns(baselineRunId, candidateRunId);
   console.log(`Scenario: ${comparison.baseline.run.scenarioId}`);
@@ -244,7 +271,7 @@ function parseRunArgs(args: string[]): {
     }
     if (arg === "--provider") {
       const provider = args[index + 1];
-      if (provider !== "mock" && provider !== "openai") {
+      if (provider !== "mock" && provider !== "openai" && provider !== "external_process") {
         throw new Error(`Unsupported provider '${String(provider)}'.`);
       }
       runtimeConfig.provider = provider;

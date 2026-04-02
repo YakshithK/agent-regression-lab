@@ -1,16 +1,40 @@
 {
   "name": "agent-regression-lab",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Local-first scenario-based evaluation harness for AI agents.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YakshithK/agent-regression-lab.git"
+  },
+  "homepage": "https://github.com/YakshithK/agent-regression-lab#readme",
+  "bugs": {
+    "url": "https://github.com/YakshithK/agent-regression-lab/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "evaluation",
+    "cli",
+    "regression"
+  ],
   "type": "module",
   "bin": {
     "agentlab": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
+    "smoke:cli": "npm run build && node dist/index.js --help && node dist/index.js version",
     "start": "tsx src/index.ts",
     "run": "tsx src/index.ts"
   },
