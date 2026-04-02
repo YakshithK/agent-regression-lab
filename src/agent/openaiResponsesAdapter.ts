@@ -2,8 +2,15 @@ import OpenAI from "openai";
 
 import type { AgentAdapter, AgentEvent, AgentRunInput, AgentSession, AgentTurnResult, ToolSpec } from "../types.js";
 
+type OpenAIResponsesClient = {
+  responses: {
+    create(request: unknown): Promise<any>;
+  };
+};
+
 type OpenAIResponsesAgentAdapterOptions = {
   apiKey?: string;
+  client?: OpenAIResponsesClient;
 };
 
 type PendingToolCall = {
@@ -18,7 +25,7 @@ class OpenAIResponsesSession implements AgentSession {
   private readonly providerTools: Array<{ internalName: string; providerName: string; tool: ToolSpec }>;
 
   constructor(
-    private readonly client: OpenAI,
+    private readonly client: OpenAIResponsesClient,
     private readonly model: string,
     private readonly input: AgentRunInput,
   ) {
@@ -134,13 +141,13 @@ export class OpenAIResponsesAgentAdapter implements AgentAdapter {
   constructor(private readonly options: OpenAIResponsesAgentAdapterOptions) {}
 
   async startRun(input: AgentRunInput): Promise<AgentSession> {
-    if (!this.options.apiKey) {
+    if (!this.options.apiKey && !this.options.client) {
       throw new Error("OPENAI_API_KEY is required for provider=openai.");
     }
 
     const model = typeof input.metadata?.model === "string" && input.metadata.model.length > 0 ? input.metadata.model : "gpt-4o-mini";
 
-    const client = new OpenAI({ apiKey: this.options.apiKey });
+    const client = this.options.client ?? new OpenAI({ apiKey: this.options.apiKey });
     return new OpenAIResponsesSession(client, model, input);
   }
 }

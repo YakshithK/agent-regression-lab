@@ -95,6 +95,8 @@ function handleApi(url: URL, response: ServerResponse): void {
         },
         notes: comparison.notes,
         deltas: comparison.deltas,
+        evaluatorDiffs: comparison.evaluatorDiffs,
+        toolDiffs: comparison.toolDiffs,
       });
       return;
     }
@@ -145,7 +147,7 @@ function renderHtml(): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent Regression Lab</title>
+    <title>Agent Regression Lab Alpha</title>
     <link rel="stylesheet" href="/assets/client.css" />
   </head>
   <body>

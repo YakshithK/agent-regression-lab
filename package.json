@@ -2,10 +2,15 @@
   "name": "agent-regression-lab",
   "version": "0.1.0",
   "private": true,
+  "description": "Local-first scenario-based evaluation harness for AI agents.",
   "type": "module",
+  "bin": {
+    "agentlab": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/**/*.test.ts",
     "start": "tsx src/index.ts",
     "run": "tsx src/index.ts"
   },

@@ -1,9 +1,10 @@
 import { createAgentFactory } from "./agent/factory.js";
+import { getAgentRegistration } from "./config.js";
 import { getRunErrorDetail } from "./runOutput.js";
 import { runScenario } from "./runner.js";
 import { listScenarios, loadScenarioById, loadScenariosBySuite } from "./scenarios.js";
 import { Storage } from "./storage.js";
-import { createToolRegistry } from "./tools.js";
+import { loadToolRegistry, loadToolSpecs } from "./tools.js";
 import { startUiServer } from "./ui/server.js";
 import type { AgentRuntimeConfig, RunBundle } from "./types.js";
 
@@ -12,7 +13,7 @@ async function main(): Promise<void> {
 
   switch (command) {
     case "list":
-      handleList(args);
+      await handleList(args);
       return;
     case "run":
       await handleRun(args);
@@ -34,14 +35,14 @@ async function main(): Promise<void> {
 function printUsage(): void {
   console.log(`Usage:
   agentlab list scenarios
-  agentlab run <scenario-id> [--provider mock|openai] [--model <model>] [--agent-label <label>]
-  agentlab run --suite <suite-id> [--provider mock|openai] [--model <model>] [--agent-label <label>]
+  agentlab run <scenario-id> [--agent <name>] [--provider mock|openai] [--model <model>] [--agent-label <label>]
+  agentlab run --suite <suite-id> [--agent <name>] [--provider mock|openai] [--model <model>] [--agent-label <label>]
   agentlab show <run-id>
   agentlab compare <baseline-run-id> <candidate-run-id>
   agentlab ui`);
 }
 
-function handleList(args: string[]): void {
+async function handleList(args: string[]): Promise<void> {
   if (args[0] !== "scenarios") {
     printUsage();
     return;
@@ -95,6 +96,8 @@ async function handleRun(args: string[]): Promise<void> {
 
 async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig): Promise<RunBundle> {
   const storage = new Storage();
+  const toolSpecs = await loadToolSpecs();
+  const toolRegistry = await loadToolRegistry();
   const loaded = loadScenarioById(scenarioId);
   storage.upsertScenario(
     {
@@ -118,9 +121,11 @@ async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig)
     agentVersion,
     scenario: loaded.definition,
     scenarioFileHash: loaded.fileHash,
-    tools: createToolRegistry(),
+    toolSpecs,
+    tools: toolRegistry,
   });
 
+  bundle.agentVersion = agentVersion;
   storage.saveRun(bundle);
   printRunSummary(bundle);
   return bundle;
@@ -131,6 +136,16 @@ function printRunSummary(bundle: RunBundle): void {
   console.log(`Scenario: ${bundle.run.scenarioId}`);
   console.log(`Status: ${bundle.run.status.toUpperCase()}`);
   console.log(`Score: ${bundle.run.score}/100`);
+  console.log(`Agent: ${bundle.agentVersion?.label ?? bundle.run.agentVersionId}`);
+  if (bundle.agentVersion?.provider) {
+    console.log(`Provider: ${bundle.agentVersion.provider}`);
+  }
+  if (bundle.agentVersion?.modelId) {
+    console.log(`Model: ${bundle.agentVersion.modelId}`);
+  }
+  if (bundle.agentVersion?.command) {
+    console.log(`Command: ${bundle.agentVersion.command} ${(bundle.agentVersion.args ?? []).join(" ")}`.trim());
+  }
   console.log(`Runtime: ${bundle.run.durationMs}ms`);
   if (bundle.run.status !== "pass") {
     console.log(`Reason: ${bundle.run.terminationReason}`);
@@ -160,6 +175,9 @@ function handleShow(args: string[]): void {
   if (bundle.agentVersion) {
     console.log(`Provider: ${bundle.agentVersion.provider ?? "unknown"}`);
     console.log(`Model: ${bundle.agentVersion.modelId ?? "unknown"}`);
+    if (bundle.agentVersion.command) {
+      console.log(`Command: ${bundle.agentVersion.command} ${(bundle.agentVersion.args ?? []).join(" ")}`.trim());
+    }
   }
   console.log(`Termination: ${bundle.run.terminationReason}`);
   const errorDetail = getRunErrorDetail(bundle);
@@ -187,11 +205,24 @@ function handleCompare(args: string[]): void {
   console.log("Changes:");
   if (comparison.notes.length === 0) {
     console.log("- No material changes.");
-    return;
+  } else {
+    for (const note of comparison.notes) {
+      console.log(`- ${note}`);
+    }
   }
 
-  for (const note of comparison.notes) {
-    console.log(`- ${note}`);
+  if (comparison.evaluatorDiffs.length > 0) {
+    console.log("Evaluator diffs:");
+    for (const diff of comparison.evaluatorDiffs) {
+      console.log(`- ${diff.note}`);
+    }
+  }
+
+  if (comparison.toolDiffs.length > 0) {
+    console.log("Tool diffs:");
+    for (const diff of comparison.toolDiffs) {
+      console.log(`- ${diff.note}`);
+    }
   }
 }
 
@@ -220,6 +251,11 @@ function parseRunArgs(args: string[]): {
       index += 1;
       continue;
     }
+    if (arg === "--agent") {
+      runtimeConfig.agentName = args[index + 1];
+      index += 1;
+      continue;
+    }
     if (arg === "--model") {
       runtimeConfig.model = args[index + 1];
       index += 1;
@@ -242,11 +278,32 @@ function parseRunArgs(args: string[]): {
 }
 
 function validateRuntimeConfig(config: AgentRuntimeConfig): AgentRuntimeConfig {
+  if (config.agentName) {
+    const registration = getAgentRegistration(config.agentName);
+    config.provider = registration.provider;
+    config.model = config.model ?? registration.model;
+    config.label = config.label ?? registration.label ?? registration.name;
+    config.command = registration.command;
+    config.args = registration.args;
+    config.envAllowlist = registration.envAllowlist;
+  }
+
   if (config.provider === "openai") {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error("OPENAI_API_KEY is required when --provider openai is used.");
     }
     config.model = config.model ?? "gpt-4o-mini";
+  }
+
+  if (config.provider === "mock") {
+    config.label = config.label ?? config.agentName ?? "mock-support-agent-v1";
+  }
+
+  if (config.provider === "external_process") {
+    if (!config.command) {
+      throw new Error("External process agents require a configured command.");
+    }
+    config.label = config.label ?? config.agentName ?? "external-process-agent";
   }
 
   return config;

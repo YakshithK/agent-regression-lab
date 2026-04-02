@@ -16,6 +16,11 @@ export type ToolSpec = {
   inputSchema?: Record<string, unknown>;
 };
 
+export type ToolRegistration = ToolSpec & {
+  modulePath?: string;
+  exportName?: string;
+};
+
 export type ScenarioDefinition = {
   id: string;
   name: string;
@@ -63,13 +68,19 @@ export type AgentVersion = {
   label: string;
   modelId?: string;
   provider?: string;
+  command?: string;
+  args?: string[];
   config: Record<string, unknown>;
 };
 
 export type AgentRuntimeConfig = {
-  provider: "mock" | "openai";
+  provider: "mock" | "openai" | "external_process";
   model?: string;
   label?: string;
+  agentName?: string;
+  command?: string;
+  args?: string[];
+  envAllowlist?: string[];
 };
 
 export type AgentRunInput = {
@@ -124,6 +135,7 @@ export type TraceEvent = {
     | "tool_call_failed"
     | "step_budget_exceeded"
     | "forbidden_tool_attempted"
+    | "timeout_exceeded"
     | "evaluation_started"
     | "evaluation_result"
     | "evaluation_finished";
@@ -217,4 +229,31 @@ export type RunComparison = {
     runtimeMs: number;
     steps: number;
   };
+  evaluatorDiffs: Array<{
+    evaluatorId: string;
+    baselineStatus?: EvaluatorStatus;
+    candidateStatus?: EvaluatorStatus;
+    note: string;
+  }>;
+  toolDiffs: Array<{
+    toolName: string;
+    baselineCount: number;
+    candidateCount: number;
+    note: string;
+  }>;
+};
+
+export type AgentLabConfig = {
+  tools?: ToolRegistration[];
+  agents?: AgentRegistration[];
+};
+
+export type AgentRegistration = {
+  name: string;
+  provider: "mock" | "openai" | "external_process";
+  model?: string;
+  label?: string;
+  command?: string;
+  args?: string[];
+  envAllowlist?: string[];
 };

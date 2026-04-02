@@ -1,0 +1,35 @@
+agents:
+  - name: mock-default
+    provider: mock
+    label: mock-default
+  - name: openai-cheap
+    provider: openai
+    model: gpt-4o-mini
+    label: openai-cheap
+  - name: custom-node-agent
+    provider: external_process
+    command: node
+    args:
+      - custom_agents/node_agent.mjs
+    label: custom-node-agent
+  - name: custom-python-agent
+    provider: external_process
+    command: python3
+    args:
+      - custom_agents/python_agent.py
+    label: custom-python-agent
+
+tools:
+  - name: support.find_duplicate_charge
+    modulePath: user_tools/findDuplicateCharge.ts
+    exportName: findDuplicateCharge
+    description: Find the duplicated charge order id for a given customer.
+    inputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        customer_id:
+          type: string
+          description: Customer id to inspect for duplicated charges.
+      required:
+        - customer_id

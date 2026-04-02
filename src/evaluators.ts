@@ -69,7 +69,8 @@ function evaluateFinalAnswerContains(evaluator: ScenarioEvaluator, finalOutput: 
   const required = Array.isArray(evaluator.config.required_substrings)
     ? evaluator.config.required_substrings.map(String)
     : [];
-  const missing = required.filter((candidate) => !finalOutput.includes(candidate));
+  const normalizedOutput = normalizeText(finalOutput);
+  const missing = required.filter((candidate) => !normalizedOutput.includes(normalizeText(candidate)));
   const passed = missing.length === 0;
 
   return {
@@ -81,6 +82,10 @@ function evaluateFinalAnswerContains(evaluator: ScenarioEvaluator, finalOutput: 
     rawScore: passed ? required.length : required.length - missing.length,
     message: passed ? "Final answer contains all required substrings." : `Missing required substrings: ${missing.join(", ")}.`,
   };
+}
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function evaluateExactFinalAnswer(evaluator: ScenarioEvaluator, finalOutput: string): EvaluatorResult {

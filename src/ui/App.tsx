@@ -31,6 +31,8 @@ type RunDetail = {
     provider?: string;
     modelId?: string;
     label: string;
+    command?: string;
+    args?: string[];
   };
   evaluatorResults: Array<{ evaluatorId: string; status: string; message: string }>;
   toolCalls: Array<{ id: string; toolName: string; input: unknown; output?: unknown; status: string }>;
@@ -47,6 +49,8 @@ type ComparePayload = {
     runtimeMs: number;
     steps: number;
   };
+  evaluatorDiffs: Array<{ evaluatorId: string; baselineStatus?: string; candidateStatus?: string; note: string }>;
+  toolDiffs: Array<{ toolName: string; baselineCount: number; candidateCount: number; note: string }>;
 };
 
 export function App(): React.JSX.Element {
@@ -56,7 +60,7 @@ export function App(): React.JSX.Element {
     <div className="shell">
       <header className="topbar">
         <a className="brand" href="/">
-          Agent Regression Lab
+          Agent Regression Lab Alpha
         </a>
       </header>
       <main className="page">
@@ -89,7 +93,7 @@ function RunListPage(): React.JSX.Element {
     <section>
       <div className="hero">
         <h1>Runs</h1>
-        <p>Inspect recent runs, filter failures, and jump into comparisons.</p>
+        <p>Inspect local alpha runs, filter failures, and compare behavior changes.</p>
       </div>
       <div className="filters">
         <input value={suite} onChange={(event) => setSuite(event.target.value)} placeholder="Suite" />
@@ -103,6 +107,7 @@ function RunListPage(): React.JSX.Element {
           <option value="">All providers</option>
           <option value="mock">Mock</option>
           <option value="openai">OpenAI</option>
+          <option value="external_process">External process</option>
         </select>
       </div>
       {runs.length === 0 ? <EmptyState title="No runs yet" description="Run a scenario from the CLI to populate the lab." /> : null}
@@ -184,6 +189,9 @@ function RunDetailPage(props: { runId: string }): React.JSX.Element {
           <h2>Summary</h2>
           <p><strong>Provider:</strong> {detail.agentVersion?.provider ?? "-"}</p>
           <p><strong>Model:</strong> {detail.agentVersion?.modelId ?? "-"}</p>
+          {detail.agentVersion?.command ? (
+            <p><strong>Command:</strong> {detail.agentVersion.command} {(detail.agentVersion.args ?? []).join(" ")}</p>
+          ) : null}
           <p><strong>Termination:</strong> {detail.run.terminationReason}</p>
           {detail.errorDetail ? <p><strong>Error:</strong> {detail.errorDetail}</p> : null}
           <p><strong>Final output:</strong></p>
@@ -274,6 +282,26 @@ function ComparePage(props: { baseline?: string; candidate?: string }): React.JS
           ))}
         </ul>
       </section>
+      <div className="panel-grid">
+        <section className="panel">
+          <h2>Evaluator diffs</h2>
+          {data.evaluatorDiffs.length === 0 ? <p className="muted">No evaluator changes.</p> : null}
+          <ul className="stack">
+            {data.evaluatorDiffs.map((diff) => (
+              <li key={diff.evaluatorId}>{diff.note}</li>
+            ))}
+          </ul>
+        </section>
+        <section className="panel">
+          <h2>Tool diffs</h2>
+          {data.toolDiffs.length === 0 ? <p className="muted">No tool usage changes.</p> : null}
+          <ul className="stack">
+            {data.toolDiffs.map((diff) => (
+              <li key={diff.toolName}>{diff.note}</li>
+            ))}
+          </ul>
+        </section>
+      </div>
       <div className="compare-grid">
         <RunSide title="Baseline" detail={data.baseline} />
         <RunSide title="Candidate" detail={data.candidate} />
@@ -290,6 +318,13 @@ function RunSide(props: { title: string; detail: RunDetail }): React.JSX.Element
       <p><strong>Status:</strong> <span className={`pill ${props.detail.run.status}`}>{props.detail.run.status}</span></p>
       <p><strong>Score:</strong> {props.detail.run.score}</p>
       <p><strong>Runtime:</strong> {props.detail.run.durationMs}ms</p>
+      <p><strong>Termination:</strong> {props.detail.run.terminationReason}</p>
+      <p><strong>Agent:</strong> {props.detail.agentVersion?.label ?? "-"}</p>
+      <p><strong>Provider:</strong> {props.detail.agentVersion?.provider ?? "-"}</p>
+      {props.detail.agentVersion?.modelId ? <p><strong>Model:</strong> {props.detail.agentVersion.modelId}</p> : null}
+      {props.detail.agentVersion?.command ? (
+        <p><strong>Command:</strong> {props.detail.agentVersion.command} {(props.detail.agentVersion.args ?? []).join(" ")}</p>
+      ) : null}
       {props.detail.errorDetail ? <p><strong>Error:</strong> {props.detail.errorDetail}</p> : null}
       <p><strong>Final output:</strong></p>
       <pre>{props.detail.run.finalOutput || "(none)"}</pre>

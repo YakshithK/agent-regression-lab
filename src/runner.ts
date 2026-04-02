@@ -4,9 +4,9 @@ import { createToolCallId, createRunId } from "./lib/id.js";
 import { evaluateScenario } from "./evaluators.js";
 import { computeScore } from "./scoring.js";
 import { TraceRecorder } from "./trace.js";
-import { getToolSpecs } from "./tools.js";
 import type {
   AgentAdapter,
+  AgentTurnResult,
   AgentVersion,
   RunBundle,
   RunRecord,
@@ -20,6 +20,7 @@ type RunnerDeps = {
   agentVersion: AgentVersion;
   scenario: ScenarioDefinition;
   scenarioFileHash: string;
+  toolSpecs: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
   tools: Record<string, (input: unknown, context: { scenarioId: string }) => Promise<unknown>>;
 };
 
@@ -31,15 +32,20 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
   const toolCalls: ToolCallRecord[] = [];
 
   const maxSteps = deps.scenario.runtime?.max_steps ?? 8;
+  const timeoutSeconds = deps.scenario.runtime?.timeout_seconds;
+  const deadline = timeoutSeconds ? Date.now() + timeoutSeconds * 1000 : undefined;
   trace.record("runner", "run_started", {
     agentVersionId: deps.agentVersion.id,
     provider: deps.agentVersion.provider ?? "unknown",
     modelId: deps.agentVersion.modelId ?? "unknown",
+    command: deps.agentVersion.command,
+    args: deps.agentVersion.args,
     scenarioVersionHash: deps.scenarioFileHash,
     maxSteps,
+    timeoutSeconds,
   });
 
-  const availableTools = getToolSpecs().filter((tool) => deps.scenario.tools.allowed.includes(tool.name));
+  const availableTools = deps.toolSpecs.filter((tool) => deps.scenario.tools.allowed.includes(tool.name));
 
   const session = await deps.agentAdapter.startRun({
     instructions: deps.scenario.task.instructions,
@@ -62,9 +68,16 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
   };
 
   while (loopCount < maxSteps) {
+    if (hasTimedOut(deadline)) {
+      status = "error";
+      terminationReason = "timeout_exceeded";
+      trace.record("runner", "timeout_exceeded", { timeoutSeconds });
+      break;
+    }
+
     loopCount += 1;
     trace.record("agent", "agent_turn_started", { loopCount });
-    const turn = await session.next(event);
+    const turn: AgentTurnResult = await raceWithTimeout(session.next(event), deadline, "Agent turn timed out.");
 
     if (turn.type === "error") {
       status = "error";
@@ -79,7 +92,7 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
       break;
     }
 
-    const toolName = turn.toolName;
+    const toolName: string = turn.toolName;
     const toolCallId = createToolCallId();
     trace.record("agent", "agent_message", { content: String(turn.metadata?.message ?? `Requesting ${toolName}`) });
     trace.record("agent", "tool_call_requested", { toolCallId, toolName, input: turn.input });
@@ -91,7 +104,7 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
       break;
     }
 
-    const handler = deps.tools[toolName];
+    const handler: ((input: unknown, context: { scenarioId: string }) => Promise<unknown>) | undefined = deps.tools[toolName];
     if (!handler) {
       status = "error";
       terminationReason = "tool_error";
@@ -102,7 +115,11 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
     const started = performance.now();
     trace.record("tool", "tool_call_started", { toolCallId, toolName, input: turn.input });
     try {
-      const result = await handler(turn.input, { scenarioId: deps.scenario.id });
+      const result: unknown = await raceWithTimeout(
+        handler(turn.input, { scenarioId: deps.scenario.id }),
+        deadline,
+        `Tool '${toolName}' timed out.`,
+      );
       const durationMs = Math.round(performance.now() - started);
       toolCalls.push({
         id: toolCallId,
@@ -117,8 +134,14 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
       event = { type: "tool_result", toolName, result };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      status = "error";
-      terminationReason = "tool_error";
+      if (deadline && Date.now() >= deadline) {
+        status = "error";
+        terminationReason = "timeout_exceeded";
+        trace.record("runner", "timeout_exceeded", { timeoutSeconds, message });
+      } else {
+        status = "error";
+        terminationReason = "tool_error";
+      }
       toolCalls.push({
         id: toolCallId,
         stepIndex: trace.getStepCount() + 1,
@@ -198,4 +221,26 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
   };
 
   return bundle;
+}
+
+function hasTimedOut(deadline?: number): boolean {
+  return deadline !== undefined && Date.now() >= deadline;
+}
+
+async function raceWithTimeout<T>(promise: Promise<T>, deadline: number | undefined, message: string): Promise<T> {
+  if (deadline === undefined) {
+    return promise;
+  }
+
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) {
+    throw new Error(message);
+  }
+
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(message)), remainingMs);
+    }),
+  ]);
 }

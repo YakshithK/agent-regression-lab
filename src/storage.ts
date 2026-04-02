@@ -15,6 +15,7 @@ import type {
 } from "./types.js";
 
 const DB_PATH = resolve("artifacts", "agentlab.db");
+const SCHEMA_VERSION = "2";
 
 export class Storage {
   private readonly db: DatabaseSync;
@@ -23,6 +24,11 @@ export class Storage {
     ensureParentDir(DB_PATH);
     this.db = new DatabaseSync(DB_PATH);
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS scenarios (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -41,6 +47,8 @@ export class Storage {
         label TEXT NOT NULL,
         model_id TEXT,
         provider TEXT,
+        command TEXT,
+        args_json TEXT,
         config_json TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
@@ -99,6 +107,8 @@ export class Storage {
         details_json TEXT
       );
     `);
+    this.ensureSchemaVersion();
+    this.ensureAgentVersionColumns();
   }
 
   upsertScenario(summary: ScenarioSummary, definition: ScenarioDefinition, filePath: string, fileHash: string): void {
@@ -135,12 +145,14 @@ export class Storage {
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `INSERT INTO agent_versions (id, label, model_id, provider, config_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO agent_versions (id, label, model_id, provider, command, args_json, config_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            label = excluded.label,
            model_id = excluded.model_id,
            provider = excluded.provider,
+           command = excluded.command,
+           args_json = excluded.args_json,
            config_json = excluded.config_json`,
       )
       .run(
@@ -148,6 +160,8 @@ export class Storage {
         agentVersion.label,
         agentVersion.modelId ?? null,
         agentVersion.provider ?? null,
+        agentVersion.command ?? null,
+        JSON.stringify(agentVersion.args ?? []),
         JSON.stringify(agentVersion.config),
         now,
       );
@@ -338,10 +352,20 @@ export class Storage {
 
     const agentVersion = this.db
       .prepare(
-        `SELECT id, label, model_id as modelId, provider, config_json
+        `SELECT id, label, model_id as modelId, provider, command, args_json, config_json
          FROM agent_versions WHERE id = ?`,
       )
-      .get(run.agentVersionId) as { id: string; label: string; modelId?: string; provider?: string; config_json: string } | undefined;
+      .get(run.agentVersionId) as
+      | {
+          id: string;
+          label: string;
+          modelId?: string;
+          provider?: string;
+          command?: string;
+          args_json?: string;
+          config_json: string;
+        }
+      | undefined;
 
     return {
       run,
@@ -354,6 +378,8 @@ export class Storage {
             label: agentVersion.label,
             modelId: agentVersion.modelId ?? undefined,
             provider: agentVersion.provider ?? undefined,
+            command: agentVersion.command ?? undefined,
+            args: agentVersion.args_json ? JSON.parse(agentVersion.args_json) : undefined,
             config: JSON.parse(agentVersion.config_json),
           }
         : undefined,
@@ -374,6 +400,9 @@ export class Storage {
     if (baseline.run.scenarioId !== candidate.run.scenarioId) {
       throw new Error("Runs can only be compared when they share the same scenario id.");
     }
+    if (baseline.run.scenarioFileHash !== candidate.run.scenarioFileHash) {
+      throw new Error("Runs can only be compared when they share the same scenario file hash.");
+    }
 
     const notes: string[] = [];
     if (baseline.run.status !== candidate.run.status) {
@@ -388,6 +417,12 @@ export class Storage {
     if (baseline.run.durationMs !== candidate.run.durationMs) {
       notes.push(`Runtime changed: ${baseline.run.durationMs}ms -> ${candidate.run.durationMs}ms`);
     }
+    if (baseline.run.terminationReason !== candidate.run.terminationReason) {
+      notes.push(`Termination changed: ${baseline.run.terminationReason} -> ${candidate.run.terminationReason}`);
+    }
+
+    const evaluatorDiffs = buildEvaluatorDiffs(baseline, candidate);
+    const toolDiffs = buildToolDiffs(baseline, candidate);
 
     return {
       baseline,
@@ -398,6 +433,8 @@ export class Storage {
         runtimeMs: candidate.run.durationMs - baseline.run.durationMs,
         steps: candidate.run.totalSteps - baseline.run.totalSteps,
       },
+      evaluatorDiffs,
+      toolDiffs,
     };
   }
 
@@ -428,4 +465,80 @@ export class Storage {
     ensureParentDir(path);
     writeFileSync(path, JSON.stringify(events, null, 2));
   }
+
+  private ensureSchemaVersion(): void {
+    const existing = this.db
+      .prepare(`SELECT value FROM metadata WHERE key = 'schema_version'`)
+      .get() as { value: string } | undefined;
+
+    if (!existing) {
+      this.db.prepare(`INSERT INTO metadata (key, value) VALUES ('schema_version', ?)`).run(SCHEMA_VERSION);
+      return;
+    }
+
+    if (existing.value !== SCHEMA_VERSION) {
+      throw new Error(
+        `Unsupported database schema version '${existing.value}'. Expected '${SCHEMA_VERSION}'. Remove artifacts/agentlab.db or add a migration.`,
+      );
+    }
+  }
+
+  private ensureAgentVersionColumns(): void {
+    const columns = this.db.prepare(`PRAGMA table_info(agent_versions)`).all() as Array<{ name: string }>;
+    const names = new Set(columns.map((column) => column.name));
+    if (!names.has("command")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN command TEXT`);
+    }
+    if (!names.has("args_json")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN args_json TEXT`);
+    }
+  }
+}
+
+function buildEvaluatorDiffs(baseline: RunBundle, candidate: RunBundle): RunComparison["evaluatorDiffs"] {
+  const ids = new Set([
+    ...baseline.evaluatorResults.map((result) => result.evaluatorId),
+    ...candidate.evaluatorResults.map((result) => result.evaluatorId),
+  ]);
+
+  return [...ids]
+    .sort()
+    .map((evaluatorId) => {
+      const baselineResult = baseline.evaluatorResults.find((result) => result.evaluatorId === evaluatorId);
+      const candidateResult = candidate.evaluatorResults.find((result) => result.evaluatorId === evaluatorId);
+      if (baselineResult?.status === candidateResult?.status) {
+        return null;
+      }
+      return {
+        evaluatorId,
+        baselineStatus: baselineResult?.status,
+        candidateStatus: candidateResult?.status,
+        note: `Evaluator '${evaluatorId}' changed: ${baselineResult?.status ?? "missing"} -> ${candidateResult?.status ?? "missing"}`,
+      };
+    })
+    .filter((diff): diff is NonNullable<typeof diff> => diff !== null);
+}
+
+function buildToolDiffs(baseline: RunBundle, candidate: RunBundle): RunComparison["toolDiffs"] {
+  const toolNames = new Set([
+    ...baseline.toolCalls.map((call) => call.toolName),
+    ...candidate.toolCalls.map((call) => call.toolName),
+  ]);
+
+  return [...toolNames]
+    .sort()
+    .map((toolName) => {
+      const baselineCount = baseline.toolCalls.filter((call) => call.toolName === toolName).length;
+      const candidateCount = candidate.toolCalls.filter((call) => call.toolName === toolName).length;
+      if (baselineCount === candidateCount) {
+        return null;
+      }
+      return {
+        toolName,
+        baselineCount,
+        candidateCount,
+        note: `Tool '${toolName}' usage changed: ${baselineCount} -> ${candidateCount}`,
+      };
+    })
+    .filter((diff): diff is NonNullable<typeof diff> => diff !== null);
 }

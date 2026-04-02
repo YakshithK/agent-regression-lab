@@ -4,12 +4,17 @@ type InternalState =
   | { step: "start" }
   | { step: "listed_customer" }
   | { step: "listed_orders" }
+  | { step: "found_duplicate" }
   | { step: "done" };
 
 class MockAgentSession implements AgentSession {
   private state: InternalState = { step: "start" };
 
   constructor(private readonly input: AgentRunInput) {}
+
+  private hasTool(toolName: string): boolean {
+    return this.input.availableTools.some((tool) => tool.name === toolName);
+  }
 
   async next(event: AgentEvent): Promise<AgentTurnResult> {
     if (event.type === "runner_error") {
@@ -33,6 +38,16 @@ class MockAgentSession implements AgentSession {
       }
 
       const result = event.result as { id?: string };
+      if (this.hasTool("support.find_duplicate_charge")) {
+        this.state = { step: "found_duplicate" };
+        return {
+          type: "tool_call",
+          toolName: "support.find_duplicate_charge",
+          input: { customer_id: String(result.id ?? "") },
+          metadata: { message: "Looking up the duplicated order directly." },
+        };
+      }
+
       this.state = { step: "listed_orders" };
       return {
         type: "tool_call",
@@ -60,6 +75,25 @@ class MockAgentSession implements AgentSession {
         type: "tool_call",
         toolName: "orders.refund",
         input: { order_id: duplicate.id },
+        metadata: { message: "Refunding the duplicated charge." },
+      };
+    }
+
+    if (this.state.step === "found_duplicate") {
+      if (event.type !== "tool_result" || typeof event.result !== "object" || event.result === null) {
+        return { type: "error", message: "Expected duplicate lookup result." };
+      }
+
+      const result = event.result as { order_id?: string };
+      if (!result.order_id) {
+        return { type: "error", message: "Duplicate lookup did not return an order id." };
+      }
+
+      this.state = { step: "done" };
+      return {
+        type: "tool_call",
+        toolName: "orders.refund",
+        input: { order_id: result.order_id },
         metadata: { message: "Refunding the duplicated charge." },
       };
     }

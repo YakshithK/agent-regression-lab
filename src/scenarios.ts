@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
 import { parse } from "yaml";
 
+import { loadAgentLabConfig } from "./config.js";
+import { getBuiltinToolSpecs } from "./tools.js";
 import type { ScenarioDefinition, ScenarioSummary } from "./types.js";
 
 const SCENARIOS_ROOT = resolve("scenarios");
@@ -38,7 +40,7 @@ export function listScenarioFiles(root = SCENARIOS_ROOT): string[] {
 
 export function listScenarios(): ScenarioSummary[] {
   return listScenarioFiles().map((filePath) => {
-    const { definition } = loadScenarioByPath(filePath);
+    const { definition } = loadScenarioByPath(filePath, getKnownToolNames());
     return {
       id: definition.id,
       name: definition.name,
@@ -51,7 +53,7 @@ export function listScenarios(): ScenarioSummary[] {
 
 export function loadScenarioById(scenarioId: string): LoadedScenario {
   for (const filePath of listScenarioFiles()) {
-    const loaded = loadScenarioByPath(filePath);
+    const loaded = loadScenarioByPath(filePath, getKnownToolNames());
     if (loaded.definition.id === scenarioId) {
       return loaded;
     }
@@ -62,15 +64,15 @@ export function loadScenarioById(scenarioId: string): LoadedScenario {
 
 export function loadScenariosBySuite(suite: string): LoadedScenario[] {
   return listScenarioFiles()
-    .map((filePath) => loadScenarioByPath(filePath))
+    .map((filePath) => loadScenarioByPath(filePath, getKnownToolNames()))
     .filter(({ definition }) => definition.suite === suite);
 }
 
-export function loadScenarioByPath(filePath: string): LoadedScenario {
+export function loadScenarioByPath(filePath: string, knownToolNames = getKnownToolNames()): LoadedScenario {
   const absolutePath = resolve(filePath);
   const raw = readFileSync(absolutePath, "utf8");
   const parsed = parse(raw) as unknown;
-  validateScenario(parsed, absolutePath);
+  validateScenario(parsed, absolutePath, knownToolNames);
 
   return {
     definition: parsed,
@@ -79,7 +81,7 @@ export function loadScenarioByPath(filePath: string): LoadedScenario {
   };
 }
 
-function validateScenario(value: unknown, filePath: string): asserts value is ScenarioDefinition {
+function validateScenario(value: unknown, filePath: string, knownToolNames: Set<string>): asserts value is ScenarioDefinition {
   if (!isObject(value)) {
     throw new Error(`Scenario file '${filePath}' must contain a YAML object.`);
   }
@@ -102,6 +104,21 @@ function validateScenario(value: unknown, filePath: string): asserts value is Sc
 
   if (!isObject(value.tools) || !Array.isArray(value.tools.allowed) || value.tools.allowed.length === 0) {
     throw new Error(`Scenario file '${filePath}' must define at least one allowed tool.`);
+  }
+  for (const toolName of value.tools.allowed) {
+    if (typeof toolName !== "string") {
+      throw new Error(`Scenario file '${filePath}' contains a non-string tool name in tools.allowed.`);
+    }
+    if (!knownToolNames.has(toolName)) {
+      throw new Error(`Scenario file '${filePath}' references unknown allowed tool '${toolName}'.`);
+    }
+  }
+  if (Array.isArray(value.tools.forbidden)) {
+    for (const toolName of value.tools.forbidden) {
+      if (typeof toolName !== "string") {
+        throw new Error(`Scenario file '${filePath}' contains a non-string tool name in tools.forbidden.`);
+      }
+    }
   }
 
   if (!Array.isArray(value.evaluators) || value.evaluators.length === 0) {
@@ -160,4 +177,12 @@ function safeExists(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+function getKnownToolNames(): Set<string> {
+  const names = new Set(getBuiltinToolSpecs().map((tool) => tool.name));
+  for (const tool of loadAgentLabConfig().tools ?? []) {
+    names.add(tool.name);
+  }
+  return names;
 }
