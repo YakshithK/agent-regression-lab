@@ -1,6 +1,6 @@
 {
   "name": "agent-regression-lab",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "description": "Local-first scenario-based evaluation harness for AI agents.",
   "license": "MIT",
