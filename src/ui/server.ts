@@ -1,7 +1,8 @@
 import { build } from "esbuild";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { dirname, extname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ensureDir } from "../lib/fs.js";
 import { getRunErrorDetail } from "../runOutput.js";
@@ -9,6 +10,8 @@ import { Storage } from "../storage.js";
 
 const UI_ROOT = resolve("artifacts", "ui");
 const ASSETS_ROOT = resolve(UI_ROOT, "assets");
+const PACKAGED_ASSETS_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "ui-assets");
+const SOURCE_UI_ENTRY = resolve("src", "ui", "client.tsx");
 const PORT = 4173;
 
 export async function startUiServer(): Promise<void> {
@@ -108,9 +111,19 @@ function handleApi(url: URL, response: ServerResponse): void {
 }
 
 async function buildUiAssets(): Promise<void> {
+  if (existsSync(PACKAGED_ASSETS_ROOT)) {
+    ensureDir(ASSETS_ROOT);
+    writePackagedAssetCopies();
+    return;
+  }
+
+  if (!existsSync(SOURCE_UI_ENTRY)) {
+    throw new Error("UI assets are unavailable. Install a package build that includes dist/ui-assets or run from the repo root.");
+  }
+
   ensureDir(ASSETS_ROOT);
   await build({
-    entryPoints: [resolve("src", "ui", "client.tsx")],
+    entryPoints: [SOURCE_UI_ENTRY],
     outdir: ASSETS_ROOT,
     bundle: true,
     format: "esm",
@@ -122,6 +135,23 @@ async function buildUiAssets(): Promise<void> {
       ".css": "css",
     },
   });
+}
+
+function writePackagedAssetCopies(): void {
+  for (const assetName of ["client.js", "client.css"]) {
+    const sourcePath = resolve(PACKAGED_ASSETS_ROOT, assetName);
+    const targetPath = resolve(ASSETS_ROOT, assetName);
+    if (!existsSync(sourcePath)) {
+      throw new Error(`Packaged UI asset '${assetName}' is missing.`);
+    }
+    responseSafeCopy(sourcePath, targetPath);
+  }
+}
+
+function responseSafeCopy(sourcePath: string, targetPath: string): void {
+  ensureDir(dirname(targetPath));
+  const contents = readFileSync(sourcePath);
+  writeFileSync(targetPath, contents);
 }
 
 function serveStatic(path: string, response: ServerResponse): void {

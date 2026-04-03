@@ -25,13 +25,15 @@
   },
   "files": [
     "dist",
+    "dist/ui-assets",
     "README.md"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:ui",
+    "build:ui": "esbuild src/ui/client.tsx --bundle --format=esm --platform=browser --outdir=dist/ui-assets --loader:.css=css --log-level=warning",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
     "smoke:cli": "npm run build && node dist/index.js --help && node dist/index.js version",

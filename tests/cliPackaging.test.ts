@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { execFile } from "node:child_process";
 import test from "node:test";
 import { promisify } from "node:util";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const execFileAsync = promisify(execFile);
@@ -13,8 +13,14 @@ test("cli entrypoint has a node shebang", () => {
 });
 
 test("built cli responds to help and version", async () => {
-  await execFileAsync("node", [resolve("node_modules/typescript/bin/tsc"), "-p", "tsconfig.json"], { cwd: process.cwd() });
+  await execFileAsync("/bin/bash", [
+    "-lc",
+    "export NVM_DIR=/home/yakshith/.nvm && source /home/yakshith/.nvm/nvm.sh && npm run build",
+  ], { cwd: process.cwd() });
   const cliPath = resolve("dist/index.js");
+
+  assert.equal(existsSync(resolve("dist/ui-assets/client.js")), true);
+  assert.equal(existsSync(resolve("dist/ui-assets/client.css")), true);
 
   const help = await execFileAsync("node", [cliPath, "--help"], { cwd: process.cwd() });
   assert.match(help.stdout, /agentlab run <scenario-id>/);
