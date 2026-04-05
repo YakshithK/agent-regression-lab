@@ -26,7 +26,8 @@
   "files": [
     "dist",
     "dist/ui-assets",
-    "README.md"
+    "README.md",
+    "docs"
   ],
   "engines": {
     "node": ">=22"

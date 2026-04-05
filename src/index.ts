@@ -14,27 +14,27 @@ async function main(): Promise<void> {
     case "--help":
     case "-h":
       printUsage();
-      return;
+      break;
     case "version":
     case "--version":
     case "-v":
       printVersion();
-      return;
+      break;
     case "list":
       await handleList(args);
-      return;
+      break;
     case "run":
       await handleRun(args);
-      return;
+      break;
     case "show":
       await handleShow(args);
-      return;
+      break;
     case "compare":
       await handleCompare(args);
-      return;
+      break;
     case "ui":
       await handleUi();
-      return;
+      break;
     default:
       printUsage();
   }
@@ -121,40 +121,44 @@ async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig,
     import("./runner.js"),
   ]);
   const storage = new Storage();
-  const toolSpecs = await loadToolSpecs();
-  const toolRegistry = await loadToolRegistry();
-  const loaded = loadScenarioById(scenarioId);
-  storage.upsertScenario(
-    {
-      id: loaded.definition.id,
-      name: loaded.definition.name,
-      suite: loaded.definition.suite,
-      difficulty: loaded.definition.difficulty,
-      description: loaded.definition.description,
-    },
-    loaded.definition,
-    loaded.filePath,
-    loaded.fileHash,
-  );
+  try {
+    const toolSpecs = await loadToolSpecs();
+    const toolRegistry = await loadToolRegistry();
+    const loaded = loadScenarioById(scenarioId);
+    storage.upsertScenario(
+      {
+        id: loaded.definition.id,
+        name: loaded.definition.name,
+        suite: loaded.definition.suite,
+        difficulty: loaded.definition.difficulty,
+        description: loaded.definition.description,
+      },
+      loaded.definition,
+      loaded.filePath,
+      loaded.fileHash,
+    );
 
-  const factory = createAgentFactory(runtimeConfig);
-  const agentVersion = factory.createVersion(runtimeConfig);
-  storage.upsertAgentVersion(agentVersion);
+    const factory = createAgentFactory(runtimeConfig);
+    const agentVersion = factory.createVersion(runtimeConfig);
+    storage.upsertAgentVersion(agentVersion);
 
-  const bundle = await runScenario({
-    agentAdapter: factory.createAdapter(),
-    agentVersion,
-    scenario: loaded.definition,
-    scenarioFileHash: loaded.fileHash,
-    toolSpecs,
-    tools: toolRegistry,
-  });
+    const bundle = await runScenario({
+      agentAdapter: factory.createAdapter(),
+      agentVersion,
+      scenario: loaded.definition,
+      scenarioFileHash: loaded.fileHash,
+      toolSpecs,
+      tools: toolRegistry,
+    });
 
-  bundle.run.suiteBatchId = suiteBatchId;
-  bundle.agentVersion = agentVersion;
-  storage.saveRun(bundle);
-  printRunSummary(bundle);
-  return bundle;
+    bundle.run.suiteBatchId = suiteBatchId;
+    bundle.agentVersion = agentVersion;
+    storage.saveRun(bundle);
+    printRunSummary(bundle);
+    return bundle;
+  } finally {
+    storage.close();
+  }
 }
 
 async function handleUi(): Promise<void> {
@@ -195,31 +199,35 @@ async function handleShow(args: string[]): Promise<void> {
 
   const { Storage } = await import("./storage.js");
   const storage = new Storage();
-  const bundle = storage.getRun(runId);
-  if (!bundle) {
-    throw new Error(`Run '${runId}' not found.`);
-  }
-
-  console.log(`Run: ${bundle.run.id}`);
-  console.log(`Scenario: ${bundle.run.scenarioId}`);
-  console.log(`Status: ${bundle.run.status.toUpperCase()}`);
-  console.log(`Score: ${bundle.run.score}/100`);
-  if (bundle.agentVersion) {
-    console.log(`Provider: ${bundle.agentVersion.provider ?? "unknown"}`);
-    console.log(`Model: ${bundle.agentVersion.modelId ?? "unknown"}`);
-    if (bundle.agentVersion.command) {
-      console.log(`Command: ${bundle.agentVersion.command} ${(bundle.agentVersion.args ?? []).join(" ")}`.trim());
+  try {
+    const bundle = storage.getRun(runId);
+    if (!bundle) {
+      throw new Error(`Run '${runId}' not found.`);
     }
-  }
-  console.log(`Termination: ${bundle.run.terminationReason}`);
-  const errorDetail = getRunErrorDetail(bundle);
-  if (errorDetail) {
-    console.log(`Error: ${errorDetail}`);
-  }
-  console.log(`Final output: ${bundle.run.finalOutput}`);
-  console.log("Evaluators:");
-  for (const result of bundle.evaluatorResults) {
-    console.log(`- ${result.evaluatorId}: ${result.status.toUpperCase()} - ${result.message}`);
+
+    console.log(`Run: ${bundle.run.id}`);
+    console.log(`Scenario: ${bundle.run.scenarioId}`);
+    console.log(`Status: ${bundle.run.status.toUpperCase()}`);
+    console.log(`Score: ${bundle.run.score}/100`);
+    if (bundle.agentVersion) {
+      console.log(`Provider: ${bundle.agentVersion.provider ?? "unknown"}`);
+      console.log(`Model: ${bundle.agentVersion.modelId ?? "unknown"}`);
+      if (bundle.agentVersion.command) {
+        console.log(`Command: ${bundle.agentVersion.command} ${(bundle.agentVersion.args ?? []).join(" ")}`.trim());
+      }
+    }
+    console.log(`Termination: ${bundle.run.terminationReason}`);
+    const errorDetail = getRunErrorDetail(bundle);
+    if (errorDetail) {
+      console.log(`Error: ${errorDetail}`);
+    }
+    console.log(`Final output: ${bundle.run.finalOutput}`);
+    console.log("Evaluators:");
+    for (const result of bundle.evaluatorResults) {
+      console.log(`- ${result.evaluatorId}: ${result.status.toUpperCase()} - ${result.message}`);
+    }
+  } finally {
+    storage.close();
   }
 }
 
@@ -227,83 +235,86 @@ async function handleCompare(args: string[]): Promise<void> {
   const isSuiteCompare = args[0] === "--suite";
   const { Storage } = await import("./storage.js");
   const storage = new Storage();
+  try {
+    if (isSuiteCompare) {
+      const baselineBatchId = args[1];
+      const candidateBatchId = args[2];
+      if (!baselineBatchId || !candidateBatchId) {
+        throw new Error("Missing baseline or candidate suite batch id.");
+      }
 
-  if (isSuiteCompare) {
-    const baselineBatchId = args[1];
-    const candidateBatchId = args[2];
-    if (!baselineBatchId || !candidateBatchId) {
-      throw new Error("Missing baseline or candidate suite batch id.");
+      const comparison = storage.compareSuites(baselineBatchId, candidateBatchId);
+      console.log(`Suite: ${comparison.suite}`);
+      console.log(`Baseline batch: ${comparison.baselineBatchId}`);
+      console.log(`Candidate batch: ${comparison.candidateBatchId}`);
+      console.log(`Classification: ${comparison.classification.toUpperCase()}`);
+      console.log(`Pass delta: ${signedMetric(comparison.deltas.pass)}`);
+      console.log(`Fail delta: ${signedMetric(comparison.deltas.fail)}`);
+      console.log(`Error delta: ${signedMetric(comparison.deltas.error)}`);
+      console.log(`Average score delta: ${signedMetric(comparison.deltas.averageScore)}`);
+      console.log(`Average runtime delta: ${signedMetric(comparison.deltas.averageRuntimeMs)}ms`);
+      console.log(`Average steps delta: ${signedMetric(comparison.deltas.averageSteps)}`);
+      if (comparison.notes.length > 0) {
+        console.log("Notes:");
+        for (const note of comparison.notes) {
+          console.log(`- ${note}`);
+        }
+      }
+      if (comparison.regressions.length > 0) {
+        console.log("Regressions:");
+        for (const regression of comparison.regressions) {
+          console.log(`- ${regression.scenarioId}: ${regression.comparison.classification}`);
+        }
+      }
+      if (comparison.improvements.length > 0) {
+        console.log("Improvements:");
+        for (const improvement of comparison.improvements) {
+          console.log(`- ${improvement.scenarioId}: ${improvement.comparison.classification}`);
+        }
+      }
+      if (comparison.missingFromCandidate.length > 0) {
+        console.log(`Missing from candidate: ${comparison.missingFromCandidate.join(", ")}`);
+      }
+      if (comparison.missingFromBaseline.length > 0) {
+        console.log(`Missing from baseline: ${comparison.missingFromBaseline.join(", ")}`);
+      }
+      return;
     }
 
-    const comparison = storage.compareSuites(baselineBatchId, candidateBatchId);
-    console.log(`Suite: ${comparison.suite}`);
-    console.log(`Baseline batch: ${comparison.baselineBatchId}`);
-    console.log(`Candidate batch: ${comparison.candidateBatchId}`);
+    const [baselineRunId, candidateRunId] = args;
+    if (!baselineRunId || !candidateRunId) {
+      throw new Error("Missing baseline or candidate run id.");
+    }
+
+    const comparison = storage.compareRuns(baselineRunId, candidateRunId);
+    console.log(`Scenario: ${comparison.baseline.run.scenarioId}`);
+    console.log(`Baseline: ${comparison.baseline.run.id} (${comparison.baseline.run.status.toUpperCase()} ${comparison.baseline.run.score}/100)`);
+    console.log(`Candidate: ${comparison.candidate.run.id} (${comparison.candidate.run.status.toUpperCase()} ${comparison.candidate.run.score}/100)`);
     console.log(`Classification: ${comparison.classification.toUpperCase()}`);
-    console.log(`Pass delta: ${signedMetric(comparison.deltas.pass)}`);
-    console.log(`Fail delta: ${signedMetric(comparison.deltas.fail)}`);
-    console.log(`Error delta: ${signedMetric(comparison.deltas.error)}`);
-    console.log(`Average score delta: ${signedMetric(comparison.deltas.averageScore)}`);
-    console.log(`Average runtime delta: ${signedMetric(comparison.deltas.averageRuntimeMs)}ms`);
-    console.log(`Average steps delta: ${signedMetric(comparison.deltas.averageSteps)}`);
-    if (comparison.notes.length > 0) {
-      console.log("Notes:");
+    console.log("Changes:");
+    if (comparison.notes.length === 0) {
+      console.log("- No material changes.");
+    } else {
       for (const note of comparison.notes) {
         console.log(`- ${note}`);
       }
     }
-    if (comparison.regressions.length > 0) {
-      console.log("Regressions:");
-      for (const regression of comparison.regressions) {
-        console.log(`- ${regression.scenarioId}: ${regression.comparison.classification}`);
+
+    if (comparison.evaluatorDiffs.length > 0) {
+      console.log("Evaluator diffs:");
+      for (const diff of comparison.evaluatorDiffs) {
+        console.log(`- ${diff.note}`);
       }
     }
-    if (comparison.improvements.length > 0) {
-      console.log("Improvements:");
-      for (const improvement of comparison.improvements) {
-        console.log(`- ${improvement.scenarioId}: ${improvement.comparison.classification}`);
+
+    if (comparison.toolDiffs.length > 0) {
+      console.log("Tool diffs:");
+      for (const diff of comparison.toolDiffs) {
+        console.log(`- ${diff.note}`);
       }
     }
-    if (comparison.missingFromCandidate.length > 0) {
-      console.log(`Missing from candidate: ${comparison.missingFromCandidate.join(", ")}`);
-    }
-    if (comparison.missingFromBaseline.length > 0) {
-      console.log(`Missing from baseline: ${comparison.missingFromBaseline.join(", ")}`);
-    }
-    return;
-  }
-
-  const [baselineRunId, candidateRunId] = args;
-  if (!baselineRunId || !candidateRunId) {
-    throw new Error("Missing baseline or candidate run id.");
-  }
-
-  const comparison = storage.compareRuns(baselineRunId, candidateRunId);
-  console.log(`Scenario: ${comparison.baseline.run.scenarioId}`);
-  console.log(`Baseline: ${comparison.baseline.run.id} (${comparison.baseline.run.status.toUpperCase()} ${comparison.baseline.run.score}/100)`);
-  console.log(`Candidate: ${comparison.candidate.run.id} (${comparison.candidate.run.status.toUpperCase()} ${comparison.candidate.run.score}/100)`);
-  console.log(`Classification: ${comparison.classification.toUpperCase()}`);
-  console.log("Changes:");
-  if (comparison.notes.length === 0) {
-    console.log("- No material changes.");
-  } else {
-    for (const note of comparison.notes) {
-      console.log(`- ${note}`);
-    }
-  }
-
-  if (comparison.evaluatorDiffs.length > 0) {
-    console.log("Evaluator diffs:");
-    for (const diff of comparison.evaluatorDiffs) {
-      console.log(`- ${diff.note}`);
-    }
-  }
-
-  if (comparison.toolDiffs.length > 0) {
-    console.log("Tool diffs:");
-    for (const diff of comparison.toolDiffs) {
-      console.log(`- ${diff.note}`);
-    }
+  } finally {
+    storage.close();
   }
 }
 

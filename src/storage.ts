@@ -115,6 +115,10 @@ export class Storage {
     this.ensureRunColumns();
   }
 
+  close(): void {
+    this.db.close();
+  }
+
   upsertScenario(summary: ScenarioSummary, definition: ScenarioDefinition, filePath: string, fileHash: string): void {
     const now = new Date().toISOString();
     this.db

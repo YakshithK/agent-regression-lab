@@ -124,6 +124,8 @@ function handleApi(url: URL, response: ServerResponse): void {
     sendJson(response, 404, { error: "Not found." });
   } catch (error) {
     sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
+  } finally {
+    storage.close();
   }
 }
 

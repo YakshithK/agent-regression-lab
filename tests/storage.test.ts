@@ -55,6 +55,7 @@ function makeBundle(id: string, overrides: Partial<RunBundle["run"]> = {}, toolN
 
 test("compareRuns includes evaluator and tool diffs", () => {
   const storage = new Storage();
+  try {
   storage.upsertAgentVersion(agentVersion);
 
   const baseline = makeBundle(`run_compare_base_${Date.now()}`, {}, ["crm.search_customer"]);
@@ -73,10 +74,14 @@ test("compareRuns includes evaluator and tool diffs", () => {
   assert.ok(comparison.notes.some((note) => note.includes("Termination changed")));
   assert.ok(comparison.evaluatorDiffs.some((diff) => diff.evaluatorId === "refund-created"));
   assert.ok(comparison.toolDiffs.some((diff) => diff.toolName === "orders.refund"));
+  } finally {
+    storage.close();
+  }
 });
 
 test("compareRuns rejects different scenario file hashes", () => {
   const storage = new Storage();
+  try {
   storage.upsertAgentVersion(agentVersion);
 
   const baseline = makeBundle(`run_hash_base_${Date.now()}`, { scenarioFileHash: "hash_a" });
@@ -86,10 +91,14 @@ test("compareRuns rejects different scenario file hashes", () => {
   storage.saveRun(candidate);
 
   assert.throws(() => storage.compareRuns(baseline.run.id, candidate.run.id), /scenario file hash/);
+  } finally {
+    storage.close();
+  }
 });
 
 test("compareSuites aggregates regressions and improvements by batch id", () => {
   const storage = new Storage();
+  try {
   storage.upsertAgentVersion(agentVersion);
 
   const baselineBatchId = `suite_batch_base_${Date.now()}`;
@@ -127,10 +136,14 @@ test("compareSuites aggregates regressions and improvements by batch id", () => 
   assert.equal(comparison.improvements.length, 1);
   assert.equal(comparison.regressions[0]?.scenarioId, "support.refund-correct-order");
   assert.equal(comparison.improvements[0]?.scenarioId, "support.refund-via-config-tool");
+  } finally {
+    storage.close();
+  }
 });
 
 test("compareSuites rejects batches from different suites", () => {
   const storage = new Storage();
+  try {
   storage.upsertAgentVersion(agentVersion);
 
   const baselineBatchId = `suite_batch_support_${Date.now()}`;
@@ -146,4 +159,7 @@ test("compareSuites rejects batches from different suites", () => {
   storage.saveRun(opsRun);
 
   assert.throws(() => storage.compareSuites(baselineBatchId, candidateBatchId), /share the same suite/);
+  } finally {
+    storage.close();
+  }
 });
