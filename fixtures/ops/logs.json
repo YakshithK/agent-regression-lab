@@ -1,0 +1,16 @@
+[
+  {
+    "service": "payments-api",
+    "lines": [
+      "ERROR upstream timeout calling issuer adapter",
+      "ERROR retry budget exhausted for card auth request"
+    ]
+  },
+  {
+    "service": "search-api",
+    "lines": [
+      "WARN cache miss rate elevated",
+      "INFO background reindex still running"
+    ]
+  }
+]

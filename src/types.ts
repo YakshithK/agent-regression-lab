@@ -1,6 +1,7 @@
 export type EvaluatorMode = "hard_gate" | "weighted";
 export type EvaluatorStatus = "pass" | "fail" | "warn";
 export type RunStatus = "pass" | "fail" | "error";
+export type ComparisonClassification = "improved" | "regressed" | "unchanged_pass" | "unchanged_fail" | "changed_non_terminal";
 export type TerminationReason =
   | "completed"
   | "evaluator_failed"
@@ -170,6 +171,7 @@ export type RunRecord = {
   scenarioId: string;
   scenarioFileHash: string;
   agentVersionId: string;
+  suiteBatchId?: string;
   status: RunStatus;
   terminationReason: TerminationReason;
   finalOutput: string;
@@ -209,6 +211,7 @@ export type RunListItem = {
   id: string;
   scenarioId: string;
   suite: string;
+  suiteBatchId?: string;
   agentVersionId: string;
   agentLabel?: string;
   provider?: string;
@@ -223,14 +226,21 @@ export type RunListItem = {
 export type RunComparison = {
   baseline: RunBundle;
   candidate: RunBundle;
+  classification: ComparisonClassification;
+  verdictDelta: string;
+  terminationDelta?: string;
+  outputChanged: boolean;
   notes: string[];
   deltas: {
     score: number;
     runtimeMs: number;
     steps: number;
+    runtimePct: number;
   };
   evaluatorDiffs: Array<{
     evaluatorId: string;
+    hardGate: boolean;
+    weight?: number;
     baselineStatus?: EvaluatorStatus;
     candidateStatus?: EvaluatorStatus;
     note: string;
@@ -239,8 +249,35 @@ export type RunComparison = {
     toolName: string;
     baselineCount: number;
     candidateCount: number;
+    risk: "none" | "new_tool";
     note: string;
   }>;
+};
+
+export type SuiteScenarioComparison = {
+  scenarioId: string;
+  comparison: RunComparison;
+};
+
+export type SuiteComparison = {
+  suite: string;
+  baselineBatchId: string;
+  candidateBatchId: string;
+  classification: "improved" | "regressed" | "unchanged" | "mixed";
+  notes: string[];
+  deltas: {
+    pass: number;
+    fail: number;
+    error: number;
+    averageScore: number;
+    averageRuntimeMs: number;
+    averageSteps: number;
+  };
+  regressions: SuiteScenarioComparison[];
+  improvements: SuiteScenarioComparison[];
+  unchanged: SuiteScenarioComparison[];
+  missingFromCandidate: string[];
+  missingFromBaseline: string[];
 };
 
 export type AgentLabConfig = {

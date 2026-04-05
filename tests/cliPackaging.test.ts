@@ -4,6 +4,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import packageJson from "../package.json" with { type: "json" };
 
 const execFileAsync = promisify(execFile);
 
@@ -26,5 +27,5 @@ test("built cli responds to help and version", async () => {
   assert.match(help.stdout, /agentlab run <scenario-id>/);
 
   const version = await execFileAsync("node", [cliPath, "version"], { cwd: process.cwd() });
-  assert.match(version.stdout.trim(), /^0\.1\.0$/);
+  assert.equal(version.stdout.trim(), packageJson.version);
 });

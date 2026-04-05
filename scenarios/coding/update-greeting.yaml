@@ -1,0 +1,41 @@
+id: coding.update-greeting
+name: Update Greeting Copy
+suite: coding
+description: Agent patches the greeting helper to use the requested welcome copy.
+tags:
+  - coding
+  - patch
+difficulty: medium
+task:
+  instructions: |
+    Update the greeting helper so it returns "Welcome, <name>" instead of the current wording.
+context:
+  fixtures:
+    - fixtures/coding/repo-files.json
+  variables:
+    target_path: src/greeter.ts
+    replacement: return `Welcome, ${name}`;
+tools:
+  allowed:
+    - repo.list_files
+    - repo.read_file
+    - repo.apply_patch
+runtime:
+  max_steps: 6
+evaluators:
+  - id: patch-applied
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: repo.apply_patch
+      match:
+        path: src/greeter.ts
+        replacement: return `Welcome, ${name}`;
+  - id: final-answer-check
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - src/greeter.ts
+        - Welcome

@@ -1,0 +1,42 @@
+id: support.disable-newsletter
+name: Disable Newsletter Subscription
+suite: support
+description: Agent disables a customer's newsletter subscription using account tools.
+tags:
+  - support
+  - account
+difficulty: easy
+task:
+  instructions: |
+    The customer wants to stop receiving the product newsletter.
+    Find the account and disable the newsletter subscription.
+context:
+  fixtures:
+    - fixtures/support/customers.json
+    - fixtures/support/accounts.json
+  variables:
+    customer_email: alice@example.com
+tools:
+  allowed:
+    - crm.search_customer
+    - accounts.get_profile
+    - accounts.update_newsletter
+runtime:
+  max_steps: 6
+evaluators:
+  - id: account-updated
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: accounts.update_newsletter
+      match:
+        customer_id: cus_100
+        subscribed: false
+  - id: final-answer-check
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - disabled
+        - newsletter

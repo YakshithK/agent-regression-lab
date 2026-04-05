@@ -1,0 +1,42 @@
+id: ops.search-api-alert
+name: Triage Search API Alert
+suite: ops
+description: Agent triages a search API alert using synthetic alerts, logs, and service status.
+tags:
+  - ops
+  - alerts
+difficulty: medium
+task:
+  instructions: |
+    Triage the active alert for the search API and identify the right escalation target.
+context:
+  fixtures:
+    - fixtures/ops/alerts.json
+    - fixtures/ops/logs.json
+    - fixtures/ops/status.json
+  variables:
+    service: search-api
+    expected_summary: The search API is degraded while the background reindex is still running.
+tools:
+  allowed:
+    - alerts.list_active
+    - logs.query_service
+    - status.get_service
+runtime:
+  max_steps: 6
+evaluators:
+  - id: logs-queried
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: logs.query_service
+      match:
+        service: search-api
+  - id: final-answer-check
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - search API is degraded
+        - search-oncall

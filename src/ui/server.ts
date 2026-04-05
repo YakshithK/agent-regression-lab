@@ -96,11 +96,28 @@ function handleApi(url: URL, response: ServerResponse): void {
           ...comparison.candidate,
           errorDetail: getRunErrorDetail(comparison.candidate),
         },
+        classification: comparison.classification,
+        verdictDelta: comparison.verdictDelta,
+        terminationDelta: comparison.terminationDelta,
+        outputChanged: comparison.outputChanged,
         notes: comparison.notes,
         deltas: comparison.deltas,
         evaluatorDiffs: comparison.evaluatorDiffs,
         toolDiffs: comparison.toolDiffs,
       });
+      return;
+    }
+
+    if (url.pathname === "/api/compare-suite") {
+      const baselineBatch = url.searchParams.get("baselineBatch");
+      const candidateBatch = url.searchParams.get("candidateBatch");
+      if (!baselineBatch || !candidateBatch) {
+        sendJson(response, 400, { error: "Both 'baselineBatch' and 'candidateBatch' query params are required." });
+        return;
+      }
+
+      const comparison = storage.compareSuites(baselineBatch, candidateBatch);
+      sendJson(response, 200, comparison);
       return;
     }
 

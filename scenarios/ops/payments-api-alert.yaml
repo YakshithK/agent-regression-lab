@@ -1,0 +1,42 @@
+id: ops.payments-api-alert
+name: Triage Payments API Alert
+suite: ops
+description: Agent triages a payments API incident using synthetic alerts, logs, and service status.
+tags:
+  - ops
+  - alerts
+difficulty: medium
+task:
+  instructions: |
+    Triage the active alert for the payments API and identify the right escalation target.
+context:
+  fixtures:
+    - fixtures/ops/alerts.json
+    - fixtures/ops/logs.json
+    - fixtures/ops/status.json
+  variables:
+    service: payments-api
+    expected_summary: The payments API is degraded due to issuer adapter timeouts.
+tools:
+  allowed:
+    - alerts.list_active
+    - logs.query_service
+    - status.get_service
+runtime:
+  max_steps: 6
+evaluators:
+  - id: logs-queried
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: logs.query_service
+      match:
+        service: payments-api
+  - id: final-answer-check
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - payments API is degraded
+        - payments-oncall

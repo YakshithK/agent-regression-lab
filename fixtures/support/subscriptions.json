@@ -1,0 +1,14 @@
+[
+  {
+    "customer_id": "cus_100",
+    "subscription_id": "sub_900",
+    "plan": "pro-monthly",
+    "status": "active"
+  },
+  {
+    "customer_id": "cus_200",
+    "subscription_id": "sub_901",
+    "plan": "basic-monthly",
+    "status": "cancelled"
+  }
+]

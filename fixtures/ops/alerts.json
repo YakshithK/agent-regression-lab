@@ -1,0 +1,14 @@
+[
+  {
+    "id": "alt_101",
+    "service": "payments-api",
+    "severity": "high",
+    "summary": "Elevated 500 rate on card authorization"
+  },
+  {
+    "id": "alt_102",
+    "service": "search-api",
+    "severity": "medium",
+    "summary": "Latency above SLO"
+  }
+]

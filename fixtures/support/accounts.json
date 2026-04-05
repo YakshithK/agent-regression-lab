@@ -1,0 +1,12 @@
+[
+  {
+    "customer_id": "cus_100",
+    "newsletter_subscribed": true,
+    "tier": "pro"
+  },
+  {
+    "customer_id": "cus_200",
+    "newsletter_subscribed": false,
+    "tier": "basic"
+  }
+]
