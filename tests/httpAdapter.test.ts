@@ -34,6 +34,12 @@ test("interpolateTemplate leaves unknown placeholders as empty string", () => {
   assert.strictEqual(result, "");
 });
 
+test("interpolateTemplate trims whitespace inside placeholders", () => {
+  assert.strictEqual(interpolateTemplate("{{ message }}", "hello", "c1"), "hello");
+  assert.strictEqual(interpolateTemplate("{{ conversation_id }}", "hello", "c1"), "c1");
+  assert.strictEqual(interpolateTemplate("{{  message  }}", "hi", "c2"), "hi");
+});
+
 test("buildRequestBody uses default shape when no template", () => {
   const body = buildRequestBody(undefined, "Where is my order?", "conv-abc");
   assert.deepStrictEqual(body, { message: "Where is my order?", conversation_id: "conv-abc" });

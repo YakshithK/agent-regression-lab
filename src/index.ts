@@ -112,6 +112,15 @@ async function handleRun(args: string[]): Promise<void> {
     }
   }
 
+  if (scenarioType === "task" && runtimeConfig.provider === "http") {
+    throw new Error(
+      `Scenario '${scenarioId}' is a task scenario. HTTP agents (provider: http) only work with ` +
+      `type: conversation scenarios.\n` +
+      `To test an HTTP agent, create a conversation scenario (type: conversation) — ` +
+      `conversation scenarios do not use a tools: block. See docs/scenarios.md for the format.`,
+    );
+  }
+
   if (scenarioType === "conversation") {
     if (runtimeConfig.provider !== "http") {
       throw new Error(

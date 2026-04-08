@@ -68,6 +68,7 @@ export function listScenarios(): ScenarioSummary[] {
 
 export function loadScenarioById(scenarioId: string): LoadedScenario {
   for (const filePath of listScenarioFiles()) {
+    if (getScenarioType(filePath) !== "task") continue;
     const loaded = loadScenarioByPath(filePath, getKnownToolNames());
     if (loaded.definition.id === scenarioId) {
       return loaded;

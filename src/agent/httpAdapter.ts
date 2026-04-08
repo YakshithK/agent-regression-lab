@@ -2,9 +2,10 @@ import { performance } from "node:perf_hooks";
 
 export function interpolateTemplate(template: string, message: string, conversationId: string): string {
   return template.replace(/\{\{([^}]+)\}\}/g, (_, key: string) => {
-    if (key === "message") return message;
-    if (key === "conversation_id") return conversationId;
-    if (key.startsWith("env.")) return process.env[key.slice(4)] ?? "";
+    const k = key.trim();
+    if (k === "message") return message;
+    if (k === "conversation_id") return conversationId;
+    if (k.startsWith("env.")) return process.env[k.slice(4)] ?? "";
     return "";
   });
 }

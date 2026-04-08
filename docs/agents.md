@@ -184,6 +184,8 @@ agents:
 - `{{conversation_id}}` — the UUID generated for this run (consistent across all steps)
 - `{{env.VAR_NAME}}` — reads from the environment at runtime
 
+Whitespace inside `{{ }}` is ignored: `{{ message }}` and `{{message}}` are identical.
+
 ### Auth and Timeout
 
 ```yaml
