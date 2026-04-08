@@ -37,6 +37,36 @@ Verify at least one extension path:
 - run `support.refund-via-config-tool` with `custom-node-agent`, or
 - verify a repo-local custom tool still loads from `agentlab.config.yaml`
 
+## HTTP Provider Smoke
+
+Verify the HTTP provider path for conversation scenarios:
+
+1. Start a minimal echo server (or any running HTTP agent service)
+2. Add a named `http` agent to `agentlab.config.yaml`:
+
+```yaml
+agents:
+  - name: my-agent
+    provider: http
+    url: http://localhost:3000/api/chat
+```
+
+3. Run a conversation scenario:
+
+```bash
+agentlab run support.order-tracking --agent my-agent
+```
+
+4. Confirm the run produces a pass/fail result and the CLI output shows turn-by-turn step status
+
+If no live HTTP service is available, confirm the HTTP error paths work correctly:
+
+```bash
+agentlab run support.order-tracking --agent my-agent
+# (with no service running)
+# Expected: status: error, terminationReason: http_connection_failed
+```
+
 ## Docs Verification
 
 Confirm these files match current behavior:

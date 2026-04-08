@@ -17,7 +17,8 @@ This is an alpha developer tool. It is ready for early technical users, but it i
 - YAML scenarios under `scenarios/`
 - deterministic built-in tools plus repo-local custom tools from `agentlab.config.yaml`
 - named agents from `agentlab.config.yaml`
-- built-in `mock`, `openai`, and `external_process` agent modes
+- built-in `mock`, `openai`, `external_process`, and `http` agent modes
+- `type: conversation` multi-turn dialog scenarios for HTTP agents
 - SQLite-backed local run history under `artifacts/agentlab.db`
 - CLI commands to list, run, show, compare, and launch the UI
 - local web UI for run inspection, run comparison, and suite batch comparison
@@ -168,6 +169,7 @@ Supported agent providers:
 - `mock`
 - `openai`
 - `external_process`
+- `http` — point at a running HTTP service for multi-turn conversation testing
 
 Working sample assets already live in this repo:
 

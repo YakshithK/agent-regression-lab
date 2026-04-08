@@ -25,6 +25,8 @@ Or skip linking and use:
 npm run start -- --help
 ```
 
+---
+
 ## `OPENAI_API_KEY is required`
 
 You used an OpenAI-backed agent without exporting the API key.
@@ -35,6 +37,8 @@ Fix:
 export OPENAI_API_KEY=...
 agentlab run support.refund-correct-order --agent openai-cheap
 ```
+
+---
 
 ## `No scenarios found for suite ...`
 
@@ -53,6 +57,8 @@ Current built-in suites in this repo include:
 - `research`
 - `ops`
 
+---
+
 ## `Run '<id>' not found`
 
 `show` and run-to-run `compare` require run ids from completed runs.
@@ -70,6 +76,8 @@ agentlab show <run-id>
 agentlab compare <baseline-run-id> <candidate-run-id>
 ```
 
+---
+
 ## `Missing baseline or candidate suite batch id`
 
 `compare --suite` does not use run ids. It uses suite batch ids printed by `run --suite`.
@@ -81,6 +89,8 @@ agentlab run --suite support --agent mock-default
 agentlab run --suite support --agent mock-default
 agentlab compare --suite <baseline-batch-id> <candidate-batch-id>
 ```
+
+---
 
 ## Cross-suite suite comparison errors
 
@@ -99,6 +109,8 @@ This is not valid:
 
 If you are unsure which batch came from which suite, rerun the suite and record the printed batch ids.
 
+---
+
 ## `agentlab ui` fails to load assets
 
 Installed packages should already include the built UI assets.
@@ -116,6 +128,8 @@ If the problem persists, verify that these files exist:
 - `dist/ui-assets/client.js`
 - `dist/ui-assets/client.css`
 
+---
+
 ## Config tool or agent not found
 
 Typical reasons:
@@ -131,6 +145,109 @@ Working references in this repo:
 - custom tool: `user_tools/findDuplicateCharge.ts`
 - external agents: `custom_agents/node_agent.mjs`, `custom_agents/python_agent.py`
 
+---
+
+## HTTP agent errors
+
+### `HTTP agents require a configured url`
+
+You ran a conversation scenario with `--provider http` but no HTTP agent config was found.
+
+Fix: define a named http agent in `agentlab.config.yaml`:
+
+```yaml
+agents:
+  - name: my-agent
+    provider: http
+    url: http://localhost:3000/api/chat
+```
+
+Then run with:
+
+```bash
+agentlab run support.order-tracking --agent my-agent
+```
+
+### `termination_reason: http_connection_failed`
+
+agentlab could not connect to your agent's URL. The most common cause is that the agent service is not running.
+
+Check:
+
+- is the service running on the configured port?
+- is the URL in `agentlab.config.yaml` correct?
+- is there a firewall or proxy blocking the connection?
+
+### `termination_reason: http_error`
+
+Your agent returned an HTTP 4xx or 5xx response.
+
+Check:
+
+- is the route path correct?
+- does your agent expect a different request shape? Use `request_template` if so.
+- are there auth errors? Check `headers` config.
+
+### `termination_reason: timeout_exceeded`
+
+Your agent did not respond within `timeout_ms` (default 30 seconds).
+
+Fix options:
+
+- increase `timeout_ms` in the agent config
+- investigate why the agent is slow for the given input
+
+### `termination_reason: invalid_response_format`
+
+Your agent either returned non-JSON or did not include the expected field.
+
+Defaults: agentlab reads the `message` field from the JSON response. Override with `response_field` if your agent uses a different name:
+
+```yaml
+agents:
+  - name: my-agent
+    provider: http
+    url: http://localhost:3000/api/chat
+    response_field: reply
+```
+
+---
+
+## Conversation scenario errors
+
+### `Scenario '...' is a conversation scenario and requires provider: http`
+
+You tried to run a `type: conversation` scenario with a non-HTTP agent (`mock`, `openai`, or `external_process`).
+
+Conversation scenarios only work with `provider: http`. Configure an HTTP agent in `agentlab.config.yaml` and use `--agent <name>`.
+
+### `Conversation scenario '...' must not define 'tools'`
+
+Your conversation scenario YAML has a `tools:` field. HTTP agents manage their own tools internally — remove the `tools:` block.
+
+### `Conversation scenario '...' must define at least one step`
+
+The `steps:` list is empty or missing. Add at least one step:
+
+```yaml
+steps:
+  - role: user
+    message: "Hello"
+```
+
+### Per-step evaluator type rejected
+
+Only these evaluator types are valid inside `steps[].evaluators`:
+
+- `response_contains`
+- `response_not_contains`
+- `response_matches_regex`
+- `response_latency_max`
+
+End-of-run types (`step_count_max`, `final_answer_contains`, `exact_final_answer`) belong at the top-level `evaluators:` block, not inside individual steps.
+
+---
+
 ## Global install behaves differently from repo mode
 
 That usually means the current working directory is wrong.
@@ -142,6 +259,8 @@ The CLI operates on the current working directory and expects:
 - optional `agentlab.config.yaml`
 
 Run it from the project root you want to evaluate.
+
+---
 
 ## Release Verification
 
