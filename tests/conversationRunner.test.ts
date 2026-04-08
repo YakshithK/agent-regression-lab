@@ -127,6 +127,7 @@ test("runConversation produces error status on HTTP 500", async () => {
     });
     assert.strictEqual(bundle.run.status, "error");
     assert.strictEqual(bundle.run.terminationReason, "http_error");
+    assert.strictEqual(bundle.run.score, 0);
   } finally {
     server.close();
   }

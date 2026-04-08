@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { ensureParentDir } from "./lib/fs.js";
 import type {
   AgentVersion,
+  ConversationScenarioDefinition,
   RunBundle,
   RunComparison,
   RunListFilters,
@@ -119,7 +120,7 @@ export class Storage {
     this.db.close();
   }
 
-  upsertScenario(summary: ScenarioSummary, definition: ScenarioDefinition, filePath: string, fileHash: string): void {
+  upsertScenario(summary: ScenarioSummary, definition: ScenarioDefinition | ConversationScenarioDefinition, filePath: string, fileHash: string): void {
     const now = new Date().toISOString();
     this.db
       .prepare(

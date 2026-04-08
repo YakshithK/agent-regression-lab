@@ -207,7 +207,7 @@ export async function executeConversation(
         difficulty: loaded.definition.difficulty,
         description: loaded.definition.description,
       },
-      loaded.definition as unknown as import("./types.js").ScenarioDefinition,
+      loaded.definition,
       loaded.filePath,
       loaded.fileHash,
     );
