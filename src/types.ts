@@ -9,7 +9,58 @@ export type TerminationReason =
   | "forbidden_tool_used"
   | "timeout_exceeded"
   | "tool_error"
-  | "agent_error";
+  | "agent_error"
+  | "http_connection_failed"
+  | "http_error"
+  | "invalid_response_format";
+
+export type ConversationEvaluatorType =
+  | "response_contains"
+  | "response_not_contains"
+  | "response_matches_regex"
+  | "response_latency_max"
+  | "step_count_max"
+  | "exact_final_answer"
+  | "final_answer_contains";
+
+export type ConversationEvaluatorSpec = {
+  type: ConversationEvaluatorType;
+  mode: EvaluatorMode;
+  weight?: number;
+  config: Record<string, unknown>;
+};
+
+export type ConversationStep = {
+  role: "user";
+  message: string;
+  evaluators?: ConversationEvaluatorSpec[];
+};
+
+export type ConversationScenarioDefinition = {
+  type: "conversation";
+  id: string;
+  name: string;
+  suite: string;
+  description?: string;
+  tags?: string[];
+  difficulty?: string;
+  state?: {
+    conversation_id?: "auto";
+  };
+  steps: ConversationStep[];
+  evaluators?: ConversationEvaluatorSpec[];
+};
+
+export type HttpAgentRegistration = {
+  name: string;
+  provider: "http";
+  label?: string;
+  url: string;
+  request_template?: Record<string, string>;
+  response_field?: string;
+  headers?: Record<string, string>;
+  timeout_ms?: number;
+};
 
 export type ToolSpec = {
   name: string;
@@ -75,13 +126,18 @@ export type AgentVersion = {
 };
 
 export type AgentRuntimeConfig = {
-  provider: "mock" | "openai" | "external_process";
+  provider: "mock" | "openai" | "external_process" | "http";
   model?: string;
   label?: string;
   agentName?: string;
   command?: string;
   args?: string[];
   envAllowlist?: string[];
+  url?: string;
+  request_template?: Record<string, string>;
+  response_field?: string;
+  headers?: Record<string, string>;
+  timeout_ms?: number;
 };
 
 export type AgentRunInput = {
@@ -139,13 +195,18 @@ export type TraceEvent = {
     | "timeout_exceeded"
     | "evaluation_started"
     | "evaluation_result"
-    | "evaluation_finished";
+    | "evaluation_finished"
+    | "conversation_started"
+    | "turn_started"
+    | "turn_completed"
+    | "step_evaluation_result"
+    | "conversation_finished";
   payload: Record<string, unknown>;
 };
 
 export type EvaluatorResult = {
   evaluatorId: string;
-  evaluatorType: ScenarioEvaluator["type"];
+  evaluatorType: ScenarioEvaluator["type"] | ConversationEvaluatorType;
   mode: EvaluatorMode;
   status: EvaluatorStatus;
   rawScore?: number;
@@ -285,7 +346,7 @@ export type AgentLabConfig = {
   agents?: AgentRegistration[];
 };
 
-export type AgentRegistration = {
+export type TaskAgentRegistration = {
   name: string;
   provider: "mock" | "openai" | "external_process";
   model?: string;
@@ -294,3 +355,5 @@ export type AgentRegistration = {
   args?: string[];
   envAllowlist?: string[];
 };
+
+export type AgentRegistration = TaskAgentRegistration | HttpAgentRegistration;

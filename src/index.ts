@@ -377,11 +377,19 @@ function validateRuntimeConfig(config: AgentRuntimeConfig): AgentRuntimeConfig {
   if (config.agentName) {
     const registration = getAgentRegistration(config.agentName);
     config.provider = registration.provider;
-    config.model = config.model ?? registration.model;
     config.label = config.label ?? registration.label ?? registration.name;
-    config.command = registration.command;
-    config.args = registration.args;
-    config.envAllowlist = registration.envAllowlist;
+    if (registration.provider !== "http") {
+      config.model = config.model ?? registration.model;
+      config.command = registration.command;
+      config.args = registration.args;
+      config.envAllowlist = registration.envAllowlist;
+    } else {
+      config.url = registration.url;
+      config.request_template = registration.request_template;
+      config.response_field = registration.response_field;
+      config.headers = registration.headers;
+      config.timeout_ms = registration.timeout_ms;
+    }
   }
 
   if (config.provider === "openai") {
