@@ -176,11 +176,9 @@ export async function runConversation(deps: ConversationRunnerDeps): Promise<Run
   }
 
   const scoring = computeScore(allEvaluatorResults);
-  if (status !== "error") {
-    status = scoring.status;
-    if (status === "fail" && terminationReason === "completed") {
-      terminationReason = "evaluator_failed";
-    }
+  status = scoring.status;
+  if (status === "fail" && terminationReason === "completed") {
+    terminationReason = "evaluator_failed";
   }
 
   trace.record("runner", "conversation_finished", {

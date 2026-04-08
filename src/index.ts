@@ -43,8 +43,8 @@ async function main(): Promise<void> {
 function printUsage(): void {
   console.log(`Usage:
   agentlab list scenarios
-  agentlab run <scenario-id> [--agent <name>] [--provider mock|openai|external_process] [--model <model>] [--agent-label <label>]
-  agentlab run --suite <suite-id> [--agent <name>] [--provider mock|openai|external_process] [--model <model>] [--agent-label <label>]
+  agentlab run <scenario-id> [--agent <name>] [--provider mock|openai|external_process|http] [--model <model>] [--agent-label <label>]
+  agentlab run --suite <suite-id> [--agent <name>] [--provider mock|openai|external_process|http] [--model <model>] [--agent-label <label>]
   agentlab show <run-id>
   agentlab compare <baseline-run-id> <candidate-run-id>
   agentlab compare --suite <baseline-batch-id> <candidate-batch-id>
@@ -76,10 +76,6 @@ async function handleRun(args: string[]): Promise<void> {
 
   if (parsed.suite) {
     const suite = parsed.suite;
-    if (!suite) {
-      throw new Error("Missing suite id.");
-    }
-
     const scenarios = loadScenariosBySuite(suite);
     if (scenarios.length === 0) {
       throw new Error(`No scenarios found for suite '${suite}'.`);
@@ -91,17 +87,7 @@ async function handleRun(args: string[]): Promise<void> {
       runs.push(await executeOne(scenario.definition.id, runtimeConfig, suiteBatchId));
     }
 
-    const passed = runs.filter((bundle) => bundle.run.status === "pass").length;
-    const failed = runs.filter((bundle) => bundle.run.status === "fail").length;
-    const errored = runs.filter((bundle) => bundle.run.status === "error").length;
-    const avgScore = Math.round(runs.reduce((sum, bundle) => sum + bundle.run.score, 0) / runs.length);
-
-    console.log(`Suite: ${suite}`);
-    console.log(`Passed: ${passed}/${runs.length}`);
-    console.log(`Failed: ${failed}/${runs.length}`);
-    console.log(`Errored: ${errored}/${runs.length}`);
-    console.log(`Average score: ${avgScore}`);
-    console.log(`Suite batch: ${suiteBatchId}`);
+    printSuiteSummary(suite, runs, suiteBatchId);
     return;
   }
 
@@ -110,7 +96,41 @@ async function handleRun(args: string[]): Promise<void> {
     throw new Error("Missing scenario id.");
   }
 
-  await executeOne(scenarioId, runtimeConfig);
+  // Detect scenario type to route to the right runner
+  const { listScenarioFiles } = await import("./scenarios.js");
+  const { parse } = await import("yaml");
+  const { readFileSync } = await import("node:fs");
+  const { resolve } = await import("node:path");
+
+  let scenarioType: "task" | "conversation" = "task";
+  for (const filePath of listScenarioFiles()) {
+    const raw = readFileSync(resolve(filePath), "utf8");
+    const parsedYaml = parse(raw) as Record<string, unknown>;
+    if (parsedYaml.id === scenarioId) {
+      scenarioType = parsedYaml.type === "conversation" ? "conversation" : "task";
+      break;
+    }
+  }
+
+  if (scenarioType === "conversation") {
+    if (runtimeConfig.provider !== "http") {
+      throw new Error(
+        `Scenario '${scenarioId}' is a conversation scenario and requires provider: http. Use --agent <name> with a configured HTTP agent.`,
+      );
+    }
+    const httpConfig: import("./types.js").HttpAgentRegistration = {
+      name: runtimeConfig.agentName ?? "http-agent",
+      provider: "http",
+      url: runtimeConfig.url!,
+      request_template: runtimeConfig.request_template,
+      response_field: runtimeConfig.response_field,
+      headers: runtimeConfig.headers,
+      timeout_ms: runtimeConfig.timeout_ms,
+    };
+    await executeConversation(scenarioId, httpConfig, runtimeConfig.label);
+  } else {
+    await executeOne(scenarioId, runtimeConfig);
+  }
 }
 
 async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig, suiteBatchId?: string): Promise<RunBundle> {
@@ -159,6 +179,111 @@ async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig,
   } finally {
     storage.close();
   }
+}
+
+export async function executeConversation(
+  scenarioId: string,
+  httpConfig: import("./types.js").HttpAgentRegistration,
+  label?: string,
+  suiteBatchId?: string,
+): Promise<RunBundle> {
+  const [{ Storage }, { loadConversationScenarioById }, { runConversation }, { createAgentVersionId }] =
+    await Promise.all([
+      import("./storage.js"),
+      import("./scenarios.js"),
+      import("./conversationRunner.js"),
+      import("./lib/id.js"),
+    ]);
+
+  const storage = new Storage();
+  try {
+    const loaded = loadConversationScenarioById(scenarioId);
+
+    storage.upsertScenario(
+      {
+        id: loaded.definition.id,
+        name: loaded.definition.name,
+        suite: loaded.definition.suite,
+        difficulty: loaded.definition.difficulty,
+        description: loaded.definition.description,
+      },
+      loaded.definition as unknown as import("./types.js").ScenarioDefinition,
+      loaded.filePath,
+      loaded.fileHash,
+    );
+
+    const agentLabel = label ?? httpConfig.label ?? httpConfig.name;
+    const agentConfig = { provider: "http", url: httpConfig.url, agentName: httpConfig.name };
+    const agentVersion: import("./types.js").AgentVersion = {
+      id: createAgentVersionId(agentLabel, agentConfig),
+      label: agentLabel,
+      provider: "http",
+      config: agentConfig,
+    };
+    storage.upsertAgentVersion(agentVersion);
+
+    const bundle = await runConversation({
+      httpConfig,
+      agentVersion,
+      scenario: loaded.definition,
+      scenarioFileHash: loaded.fileHash,
+    });
+
+    bundle.run.suiteBatchId = suiteBatchId;
+    bundle.agentVersion = agentVersion;
+    storage.saveRun(bundle);
+    printConversationSummary(bundle, httpConfig.url, loaded.definition.steps.length);
+    return bundle;
+  } finally {
+    storage.close();
+  }
+}
+
+function printSuiteSummary(suite: string, runs: RunBundle[], suiteBatchId: string): void {
+  const passed = runs.filter((bundle) => bundle.run.status === "pass").length;
+  const failed = runs.filter((bundle) => bundle.run.status === "fail").length;
+  const errored = runs.filter((bundle) => bundle.run.status === "error").length;
+  const avgScore = Math.round(runs.reduce((sum, bundle) => sum + bundle.run.score, 0) / runs.length);
+  console.log(`Suite: ${suite}`);
+  console.log(`Passed: ${passed}/${runs.length}`);
+  console.log(`Failed: ${failed}/${runs.length}`);
+  console.log(`Errored: ${errored}/${runs.length}`);
+  console.log(`Average score: ${avgScore}`);
+  console.log(`Suite batch: ${suiteBatchId}`);
+}
+
+function printConversationSummary(bundle: RunBundle, agentUrl: string, totalSteps: number): void {
+  const statusLabel = bundle.run.status.toUpperCase();
+  console.log(`run ${bundle.run.scenarioId} — ${statusLabel}`);
+  console.log(`  agent: ${bundle.agentVersion?.label ?? bundle.run.agentVersionId} (${agentUrl})`);
+  console.log(`  turns completed: ${bundle.run.totalSteps}/${totalSteps}`);
+
+  const stepEvals = bundle.evaluatorResults.filter((r) => r.evaluatorId.startsWith("step_"));
+  const stepIndices = new Set(
+    stepEvals.map((r) => {
+      const match = r.evaluatorId.match(/^step_(\d+)_/);
+      return match ? parseInt(match[1], 10) : -1;
+    }),
+  );
+
+  for (const stepIndex of [...stepIndices].sort((a, b) => a - b)) {
+    const resultsForStep = stepEvals.filter((r) => r.evaluatorId.startsWith(`step_${stepIndex}_`));
+    const allPass = resultsForStep.every((r) => r.status === "pass");
+    const stepStatus = allPass ? "pass" : "FAIL";
+    const details = resultsForStep.map((r) => {
+      if (r.evaluatorType === "response_latency_max") {
+        const latencyMatch = r.message.match(/(\d+)ms/);
+        return latencyMatch ? `latency ${latencyMatch[1]}ms ✓` : r.message;
+      }
+      return `${r.evaluatorType} ${r.status === "pass" ? "✓" : "✗"}`;
+    });
+    console.log(`  step ${stepIndex + 1}: ${stepStatus}${details.length > 0 ? ` (${details.join(", ")})` : ""}`);
+  }
+
+  if (bundle.run.status !== "pass") {
+    console.log(`  run stopped (${bundle.run.terminationReason})`);
+  }
+  console.log(`  run id: ${bundle.run.id}`);
 }
 
 async function handleUi(): Promise<void> {
@@ -340,7 +465,7 @@ function parseRunArgs(args: string[]): {
     }
     if (arg === "--provider") {
       const provider = args[index + 1];
-      if (provider !== "mock" && provider !== "openai" && provider !== "external_process") {
+      if (provider !== "mock" && provider !== "openai" && provider !== "external_process" && provider !== "http") {
         throw new Error(`Unsupported provider '${String(provider)}'.`);
       }
       runtimeConfig.provider = provider;
@@ -408,6 +533,13 @@ function validateRuntimeConfig(config: AgentRuntimeConfig): AgentRuntimeConfig {
       throw new Error("External process agents require a configured command.");
     }
     config.label = config.label ?? config.agentName ?? "external-process-agent";
+  }
+
+  if (config.provider === "http") {
+    if (!config.url) {
+      throw new Error("HTTP agents require a configured url. Use --agent <name> with provider: http in agentlab.config.yaml.");
+    }
+    config.label = config.label ?? config.agentName ?? "http-agent";
   }
 
   return config;
