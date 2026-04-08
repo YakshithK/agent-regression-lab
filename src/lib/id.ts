@@ -8,6 +8,10 @@ export function createRunId(): string {
   return `run_${Date.now()}`;
 }
 
+export function createSuiteBatchId(): string {
+  return `suite_${Date.now()}_${randomUUID().slice(0, 8)}`;
+}
+
 export function createEventId(): string {
   return `evt_${randomUUID()}`;
 }

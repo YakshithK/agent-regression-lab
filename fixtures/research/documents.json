@@ -1,0 +1,17 @@
+[
+  {
+    "id": "doc_remote_work",
+    "title": "Remote Work Policy",
+    "content": "The remote work policy allows employees to work remotely three days per week with manager approval."
+  },
+  {
+    "id": "doc_expenses",
+    "title": "Travel Expense Policy",
+    "content": "Travel expenses must be submitted within 30 days of the trip and require itemized receipts."
+  },
+  {
+    "id": "doc_security",
+    "title": "Security Handbook",
+    "content": "Production credentials must never be shared in chat and must be stored in the approved secret manager."
+  }
+]

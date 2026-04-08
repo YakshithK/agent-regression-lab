@@ -1,0 +1,40 @@
+id: research.travel-expense-policy
+name: Answer Travel Expense Policy Question
+suite: research
+description: Agent answers an expense policy question from provided docs and cites the source document.
+tags:
+  - research
+  - docs
+difficulty: medium
+task:
+  instructions: |
+    Answer the question using the provided policy docs and cite the source document id.
+context:
+  fixtures:
+    - fixtures/research/documents.json
+  variables:
+    query: travel expenses
+    expected_answer: expenses must be submitted within 30 days
+    answer_prefix: Policy answer
+tools:
+  allowed:
+    - docs.search
+    - docs.read
+runtime:
+  max_steps: 5
+evaluators:
+  - id: doc-read
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: docs.read
+      match:
+        doc_id: doc_expenses
+  - id: final-answer-check
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - 30 days
+        - doc_expenses

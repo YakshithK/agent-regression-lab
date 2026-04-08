@@ -2,61 +2,114 @@
 
 Agent Regression Lab is a local-first evaluation harness for AI agents.
 
-It lets you define fixed scenarios in YAML, run an agent against them repeatedly, capture a structured trace, score the result, and compare runs over time.
+It gives you a repeatable way to define scenarios in YAML, run agents against deterministic tool surfaces, store traces and scores locally, and compare runs or suite batches over time.
 
-This is an alpha developer tool. It is useful now for local benchmarking and debugging, but it is not yet a polished platform.
+This is an alpha developer tool. It is ready for early technical users, but it is not a polished platform.
+
+## Who It Is For
+
+- engineers building or debugging agent workflows
+- researchers who want repeatable local evals
+- teams that want a simple local regression harness before investing in heavier infrastructure
 
 ## What It Supports Today
 
 - YAML scenarios under `scenarios/`
-- Deterministic built-in tools plus repo-local custom tools from `agentlab.config.yaml`
-- Named agents from `agentlab.config.yaml`
-- Built-in `mock`, `openai`, and `external_process` agent modes
+- deterministic built-in tools plus repo-local custom tools from `agentlab.config.yaml`
+- named agents from `agentlab.config.yaml`
+- built-in `mock`, `openai`, and `external_process` agent modes
 - SQLite-backed local run history under `artifacts/agentlab.db`
 - CLI commands to list, run, show, compare, and launch the UI
-- Local web UI for run inspection and direct run-to-run comparison
+- local web UI for run inspection, run comparison, and suite batch comparison
 
-## Quickstart
+## First 10 Minutes
 
-1. Install dependencies:
+The fastest path is to run the CLI from a local checkout.
+
+1. Install dependencies and build:
 
 ```bash
 npm install
-```
-
-2. Run the typecheck, tests, and build:
-
-```bash
 npm run check
 npm test
 npm run build
 ```
 
-3. Run a scenario:
+2. Verify the CLI:
 
 ```bash
-npm run start -- run support.refund-correct-order --agent mock-default
+agentlab --help
 ```
 
-4. Inspect a run:
+If you have not linked the package locally yet, use:
 
 ```bash
-npm run start -- show <run-id>
+npm link
+agentlab --help
 ```
 
-5. Launch the local UI:
+3. List scenarios:
 
 ```bash
-npm run start -- ui
+agentlab list scenarios
+```
+
+4. Run a deterministic sample scenario:
+
+```bash
+agentlab run support.refund-correct-order --agent mock-default
+```
+
+5. Inspect the run:
+
+```bash
+agentlab show <run-id>
+```
+
+6. Run the same scenario again, then compare the two runs:
+
+```bash
+agentlab compare <baseline-run-id> <candidate-run-id>
+```
+
+7. Launch the local UI:
+
+```bash
+agentlab ui
 ```
 
 The UI starts on `http://127.0.0.1:4173`.
 
-## Installable CLI
+8. Run a suite and compare two suite batches:
 
-The package can be installed as a Node CLI.
+```bash
+agentlab run --suite support --agent mock-default
+agentlab run --suite support --agent mock-default
+agentlab compare --suite <baseline-batch-id> <candidate-batch-id>
+```
 
-Local development install:
+`run --suite` prints a `Suite batch:` id at the end. That is the id used by `compare --suite`.
+
+## Install
+
+### Installed CLI
+
+After the package is published:
+
+```bash
+npm install -g agent-regression-lab
+agentlab --help
+```
+
+You can also use:
+
+```bash
+npx agent-regression-lab --help
+```
+
+### Local Development Install
+
+From this repo:
 
 ```bash
 npm install
@@ -65,16 +118,18 @@ npm link
 agentlab --help
 ```
 
-Packed or published install:
+### Repo-Local Dev Mode
+
+If you do not want to link the package yet:
 
 ```bash
-npm install -g agent-regression-lab
-agentlab --help
+npm run start -- --help
+npm run start -- run support.refund-correct-order --agent mock-default
 ```
 
-The CLI operates on the current working directory. Run it from the root of a project that contains `scenarios/`, `fixtures/`, and optional `agentlab.config.yaml`.
-
 ## CLI
+
+Supported command surface:
 
 ```text
 agentlab list scenarios
@@ -82,55 +137,31 @@ agentlab run <scenario-id> [--agent <name>]
 agentlab run --suite <suite-id> [--agent <name>]
 agentlab show <run-id>
 agentlab compare <baseline-run-id> <candidate-run-id>
+agentlab compare --suite <baseline-batch-id> <candidate-batch-id>
 agentlab ui
+agentlab version
+agentlab help
 ```
 
-You can also run these through `npm run start -- ...` during local development.
+The CLI operates on the current working directory. Run it from the root of a project that contains `scenarios/`, `fixtures/`, and optional `agentlab.config.yaml`.
 
-## Scenarios
+## Canonical Workflow
 
-Scenarios are YAML files under `scenarios/`.
+Use this as the default mental model:
 
-Current scenario features:
+1. list scenarios
+2. run one scenario or one suite
+3. note the run id or suite batch id
+4. inspect the run in CLI or UI
+5. compare two runs or two suite batches
+6. extend the setup with a named agent or repo-local tool when needed
 
-- task instructions
-- fixture references
-- allowed and forbidden tools
-- `max_steps`
-- `timeout_seconds`
-- evaluator configuration
+## Config And Extension Points
 
-Example scenario shape:
+`agentlab.config.yaml` is the public extension point for:
 
-```yaml
-id: support.refund-correct-order
-name: Refund The Correct Order
-suite: support
-task:
-  instructions: |
-    The customer says they were charged twice.
-    Find the duplicated charge and refund only that order.
-tools:
-  allowed:
-    - crm.search_customer
-    - orders.list
-    - orders.refund
-runtime:
-  max_steps: 8
-  timeout_seconds: 60
-evaluators:
-  - id: refund-created
-    type: tool_call_assertion
-    mode: hard_gate
-    config:
-      tool: orders.refund
-      match:
-        order_id: ord_1024
-```
-
-## Custom Agents And Tools
-
-`agentlab.config.yaml` is the extension point for named agents and repo-local tools.
+- named agents
+- repo-local custom tools
 
 Supported agent providers:
 
@@ -138,68 +169,54 @@ Supported agent providers:
 - `openai`
 - `external_process`
 
-Supported custom tool model:
+Working sample assets already live in this repo:
 
-- repo-local JS/TS module path
-- named export that resolves to an async function
+- external agents: `custom_agents/node_agent.mjs`, `custom_agents/python_agent.py`
+- custom tool: `user_tools/findDuplicateCharge.ts`
+- sample config: `agentlab.config.yaml`
 
-Example config:
+See:
 
-```yaml
-agents:
-  - name: custom-node-agent
-    provider: external_process
-    command: node
-    args:
-      - custom_agents/node_agent.mjs
-    label: custom-node-agent
+- [docs/scenarios.md](docs/scenarios.md)
+- [docs/tools.md](docs/tools.md)
+- [docs/agents.md](docs/agents.md)
+- [docs/troubleshooting.md](docs/troubleshooting.md)
+- [docs/release-checklist.md](docs/release-checklist.md)
 
-tools:
-  - name: support.find_duplicate_charge
-    modulePath: user_tools/findDuplicateCharge.ts
-    exportName: findDuplicateCharge
-    description: Find the duplicated charge order id for a given customer.
-    inputSchema:
-      type: object
-      additionalProperties: false
-      properties:
-        customer_id:
-          type: string
-      required:
-        - customer_id
-```
+## Local Data And Artifacts
 
-## External Process Protocol
+By default the product writes local state under `artifacts/`.
 
-External agents communicate with the runner over line-delimited JSON on stdin/stdout.
+Important paths:
 
-Runner events:
+- SQLite DB: `artifacts/agentlab.db`
+- per-run trace output: `artifacts/<run-id>/trace.json`
+- local UI assets at runtime: served from packaged `dist/ui-assets` or built into `artifacts/ui/` in repo mode
 
-- `run_started`
-- `tool_result`
-- `runner_error`
+If you delete `artifacts/`, you remove stored run history and generated local outputs.
 
-Agent responses:
+## Determinism
 
-- `tool_call`
-- `final`
-- `error`
+The benchmark is designed to be deterministic enough for repeated local evaluation:
 
-The runner stays in control of the loop. External agents must not execute tools directly.
+- built-in tools read from local fixtures
+- scenarios declare fixed tool allowlists and evaluator rules
+- scoring is rule-based
+- suite comparison is based on stored local runs and suite batch ids
 
-Minimal flow:
+Agent behavior can still vary depending on the provider path. The built-in `mock` path is the most deterministic path for smoke tests and baseline examples.
 
-1. runner sends `run_started` with instructions, tool specs, context, and limits
-2. agent sends back a `tool_call` or `final`
-3. runner executes the tool and sends `tool_result`
-4. agent sends the next `tool_call` or `final`
+## Limitations
 
-See `custom_agents/node_agent.mjs` and `custom_agents/python_agent.py` for working examples.
+- this is a local-first alpha, not a hosted platform
+- custom tool loading is limited to repo-local module paths
+- external agents integrate through the local stdin/stdout protocol only
+- the UI is intentionally minimal and optimized for debugging
+- the benchmark is broader than before, but still small compared to a mature benchmark product
 
-## Honest Limitations
+## Next Docs
 
-- comparison is run-to-run, not full suite regression analysis yet
-- tool loading is limited to local repo module paths
-- external agents use the local stdin/stdout protocol only
-- the UI is intentionally minimal and optimized for debugging, not dashboards
-- the benchmark suite is still small
+- scenario authoring: [docs/scenarios.md](docs/scenarios.md)
+- custom tools: [docs/tools.md](docs/tools.md)
+- named agents and external-process protocol: [docs/agents.md](docs/agents.md)
+- common failure modes: [docs/troubleshooting.md](docs/troubleshooting.md)

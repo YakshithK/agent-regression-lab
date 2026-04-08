@@ -1,0 +1,42 @@
+id: coding.fix-add-function
+name: Fix Add Function
+suite: coding
+description: Agent patches a toy repo file to fix an arithmetic bug.
+tags:
+  - coding
+  - patch
+difficulty: medium
+task:
+  instructions: |
+    The add function in the toy repo is wrong.
+    Find the target file and patch it so add(a, b) returns a + b.
+context:
+  fixtures:
+    - fixtures/coding/repo-files.json
+  variables:
+    target_path: src/math.ts
+    replacement: return a + b;
+tools:
+  allowed:
+    - repo.list_files
+    - repo.read_file
+    - repo.apply_patch
+runtime:
+  max_steps: 6
+evaluators:
+  - id: patch-applied
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: repo.apply_patch
+      match:
+        path: src/math.ts
+        replacement: return a + b;
+  - id: final-answer-check
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - src/math.ts
+        - return a + b;

@@ -1,0 +1,40 @@
+id: support.cancel-subscription
+name: Cancel Active Subscription
+suite: support
+description: Agent cancels the active subscription for the customer.
+tags:
+  - support
+  - billing
+difficulty: easy
+task:
+  instructions: |
+    The customer wants to cancel their current subscription.
+    Find the customer and cancel the active subscription.
+context:
+  fixtures:
+    - fixtures/support/customers.json
+    - fixtures/support/subscriptions.json
+  variables:
+    customer_email: alice@example.com
+tools:
+  allowed:
+    - crm.search_customer
+    - subscriptions.cancel
+runtime:
+  max_steps: 5
+evaluators:
+  - id: subscription-cancelled
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: subscriptions.cancel
+      match:
+        customer_id: cus_100
+  - id: final-answer-check
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - Cancelled
+        - sub_900

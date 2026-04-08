@@ -15,7 +15,8 @@ context:
     - fixtures/support/customers.json
     - fixtures/support/orders.json
   variables:
-    customer_email: alice@example.com
+    customer_email: bob@example.com
+    target_order_id: ord_2001
 tools:
   allowed:
     - crm.search_customer
@@ -30,11 +31,11 @@ evaluators:
     config:
       tool: orders.refund
       match:
-        order_id: ord_1024
+        order_id: ord_2001
   - id: final-answer-check
     type: final_answer_contains
     mode: weighted
     weight: 100
     config:
       required_substrings:
-        - ord_1024
+        - ord_2001

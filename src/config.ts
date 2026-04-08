@@ -2,7 +2,7 @@ import { statSync, readFileSync } from "node:fs";
 import { resolve, relative, sep } from "node:path";
 import { parse } from "yaml";
 
-import type { AgentLabConfig, AgentRegistration, ToolRegistration } from "./types.js";
+import type { AgentLabConfig, AgentRegistration, HttpAgentRegistration, ToolRegistration } from "./types.js";
 
 const CONFIG_PATH = resolve("agentlab.config.yaml");
 
@@ -97,12 +97,17 @@ function validateAgentRegistration(value: unknown): asserts value is AgentRegist
     throw new Error("Each agent registration must define a non-empty 'name'.");
   }
 
-  if (value.provider !== "mock" && value.provider !== "openai" && value.provider !== "external_process") {
+  if (value.provider !== "mock" && value.provider !== "openai" && value.provider !== "external_process" && value.provider !== "http") {
     throw new Error(`Agent '${value.name}' uses unsupported provider '${String(value.provider)}'.`);
   }
 
   if (value.label !== undefined && (typeof value.label !== "string" || value.label.length === 0)) {
     throw new Error(`Agent '${value.name}' must define a non-empty 'label' when provided.`);
+  }
+
+  if (value.provider === "http") {
+    validateHttpAgentConfig(value);
+    return;
   }
 
   if (value.provider === "openai" && value.model !== undefined && (typeof value.model !== "string" || value.model.length === 0)) {
@@ -121,6 +126,39 @@ function validateAgentRegistration(value: unknown): asserts value is AgentRegist
     if (value.envAllowlist !== undefined) {
       if (!Array.isArray(value.envAllowlist) || value.envAllowlist.some((key) => typeof key !== "string" || key.length === 0)) {
         throw new Error(`Agent '${value.name}' field 'envAllowlist' must be an array of non-empty strings.`);
+      }
+    }
+  }
+}
+
+export function validateHttpAgentConfig(value: Record<string, unknown>): void {
+  const name = String(value.name ?? "");
+  if (typeof value.url !== "string" || value.url.length === 0) {
+    throw new Error(`Agent '${name}' with provider 'http' must define a non-empty 'url'.`);
+  }
+  if (value.timeout_ms !== undefined && (typeof value.timeout_ms !== "number" || value.timeout_ms <= 0)) {
+    throw new Error(`Agent '${name}' field 'timeout_ms' must be a positive number.`);
+  }
+  if (value.request_template !== undefined) {
+    if (!isObject(value.request_template)) {
+      throw new Error(`Agent '${name}' field 'request_template' must be an object.`);
+    }
+    for (const [k, v] of Object.entries(value.request_template)) {
+      if (typeof v !== "string") {
+        throw new Error(`Agent '${name}' request_template field '${k}' must be a string value.`);
+      }
+    }
+  }
+  if (value.response_field !== undefined && (typeof value.response_field !== "string" || value.response_field.length === 0)) {
+    throw new Error(`Agent '${name}' field 'response_field' must be a non-empty string.`);
+  }
+  if (value.headers !== undefined) {
+    if (!isObject(value.headers)) {
+      throw new Error(`Agent '${name}' field 'headers' must be an object.`);
+    }
+    for (const [k, v] of Object.entries(value.headers)) {
+      if (typeof v !== "string") {
+        throw new Error(`Agent '${name}' headers field '${k}' must be a string value.`);
       }
     }
   }

@@ -55,6 +55,7 @@ function makeBundle(id: string, overrides: Partial<RunBundle["run"]> = {}, toolN
 
 test("compareRuns includes evaluator and tool diffs", () => {
   const storage = new Storage();
+  try {
   storage.upsertAgentVersion(agentVersion);
 
   const baseline = makeBundle(`run_compare_base_${Date.now()}`, {}, ["crm.search_customer"]);
@@ -68,13 +69,19 @@ test("compareRuns includes evaluator and tool diffs", () => {
   storage.saveRun(candidate);
 
   const comparison = storage.compareRuns(baseline.run.id, candidate.run.id);
+  assert.equal(comparison.classification, "regressed");
+  assert.equal(comparison.verdictDelta, "pass -> fail");
   assert.ok(comparison.notes.some((note) => note.includes("Termination changed")));
   assert.ok(comparison.evaluatorDiffs.some((diff) => diff.evaluatorId === "refund-created"));
   assert.ok(comparison.toolDiffs.some((diff) => diff.toolName === "orders.refund"));
+  } finally {
+    storage.close();
+  }
 });
 
 test("compareRuns rejects different scenario file hashes", () => {
   const storage = new Storage();
+  try {
   storage.upsertAgentVersion(agentVersion);
 
   const baseline = makeBundle(`run_hash_base_${Date.now()}`, { scenarioFileHash: "hash_a" });
@@ -84,4 +91,75 @@ test("compareRuns rejects different scenario file hashes", () => {
   storage.saveRun(candidate);
 
   assert.throws(() => storage.compareRuns(baseline.run.id, candidate.run.id), /scenario file hash/);
+  } finally {
+    storage.close();
+  }
+});
+
+test("compareSuites aggregates regressions and improvements by batch id", () => {
+  const storage = new Storage();
+  try {
+  storage.upsertAgentVersion(agentVersion);
+
+  const baselineBatchId = `suite_batch_base_${Date.now()}`;
+  const candidateBatchId = `suite_batch_candidate_${Date.now()}`;
+
+  const baselinePass = makeBundle(`run_suite_base_pass_${Date.now()}`, { suiteBatchId: baselineBatchId });
+  const baselineFail = makeBundle(`run_suite_base_fail_${Date.now()}`, {
+    scenarioId: "support.refund-via-config-tool",
+    suiteBatchId: baselineBatchId,
+    status: "fail",
+    score: 20,
+  });
+
+  const candidateRegression = makeBundle(`run_suite_candidate_reg_${Date.now()}`, {
+    suiteBatchId: candidateBatchId,
+    status: "fail",
+    terminationReason: "tool_error",
+    score: 10,
+  }, ["crm.search_customer", "orders.refund"]);
+  const candidateImprovement = makeBundle(`run_suite_candidate_imp_${Date.now()}`, {
+    scenarioId: "support.refund-via-config-tool",
+    suiteBatchId: candidateBatchId,
+    status: "pass",
+    score: 100,
+  });
+
+  storage.saveRun(baselinePass);
+  storage.saveRun(baselineFail);
+  storage.saveRun(candidateRegression);
+  storage.saveRun(candidateImprovement);
+
+  const comparison = storage.compareSuites(baselineBatchId, candidateBatchId);
+  assert.equal(comparison.classification, "regressed");
+  assert.equal(comparison.regressions.length, 1);
+  assert.equal(comparison.improvements.length, 1);
+  assert.equal(comparison.regressions[0]?.scenarioId, "support.refund-correct-order");
+  assert.equal(comparison.improvements[0]?.scenarioId, "support.refund-via-config-tool");
+  } finally {
+    storage.close();
+  }
+});
+
+test("compareSuites rejects batches from different suites", () => {
+  const storage = new Storage();
+  try {
+  storage.upsertAgentVersion(agentVersion);
+
+  const baselineBatchId = `suite_batch_support_${Date.now()}`;
+  const candidateBatchId = `suite_batch_ops_${Date.now()}`;
+
+  const supportRun = makeBundle(`run_suite_support_${Date.now()}`, { suiteBatchId: baselineBatchId });
+  const opsRun = makeBundle(`run_suite_ops_${Date.now()}`, {
+    scenarioId: "ops.payments-api-alert",
+    suiteBatchId: candidateBatchId,
+  });
+
+  storage.saveRun(supportRun);
+  storage.saveRun(opsRun);
+
+  assert.throws(() => storage.compareSuites(baselineBatchId, candidateBatchId), /share the same suite/);
+  } finally {
+    storage.close();
+  }
 });

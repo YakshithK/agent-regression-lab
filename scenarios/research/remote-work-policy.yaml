@@ -1,0 +1,40 @@
+id: research.remote-work-policy
+name: Answer Remote Work Policy Question
+suite: research
+description: Agent answers a policy question from provided docs and cites the source document.
+tags:
+  - research
+  - docs
+difficulty: medium
+task:
+  instructions: |
+    Answer the question using the provided policy docs and cite the source document id.
+context:
+  fixtures:
+    - fixtures/research/documents.json
+  variables:
+    query: remote work
+    expected_answer: employees can work remotely three days per week
+    answer_prefix: Policy answer
+tools:
+  allowed:
+    - docs.search
+    - docs.read
+runtime:
+  max_steps: 5
+evaluators:
+  - id: doc-read
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: docs.read
+      match:
+        doc_id: doc_remote_work
+  - id: final-answer-check
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - three days per week
+        - doc_remote_work

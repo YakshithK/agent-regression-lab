@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { ensureParentDir } from "./lib/fs.js";
 import type {
   AgentVersion,
+  ConversationScenarioDefinition,
   RunBundle,
   RunComparison,
   RunListFilters,
@@ -12,6 +13,8 @@ import type {
   RunRecord,
   ScenarioDefinition,
   ScenarioSummary,
+  SuiteComparison,
+  SuiteScenarioComparison,
 } from "./types.js";
 
 const DB_PATH = resolve("artifacts", "agentlab.db");
@@ -58,6 +61,7 @@ export class Storage {
         scenario_id TEXT NOT NULL,
         scenario_file_hash TEXT NOT NULL,
         agent_version_id TEXT NOT NULL,
+        suite_batch_id TEXT,
         status TEXT NOT NULL,
         termination_reason TEXT NOT NULL,
         final_output TEXT NOT NULL,
@@ -109,9 +113,14 @@ export class Storage {
     `);
     this.ensureSchemaVersion();
     this.ensureAgentVersionColumns();
+    this.ensureRunColumns();
   }
 
-  upsertScenario(summary: ScenarioSummary, definition: ScenarioDefinition, filePath: string, fileHash: string): void {
+  close(): void {
+    this.db.close();
+  }
+
+  upsertScenario(summary: ScenarioSummary, definition: ScenarioDefinition | ConversationScenarioDefinition, filePath: string, fileHash: string): void {
     const now = new Date().toISOString();
     this.db
       .prepare(
@@ -173,8 +182,8 @@ export class Storage {
       .prepare(
         `INSERT INTO runs (
           id, scenario_id, scenario_file_hash, agent_version_id, status, termination_reason, final_output,
-          total_steps, total_tool_calls, duration_ms, total_tokens, total_cost_usd, score, started_at, finished_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          suite_batch_id, total_steps, total_tool_calls, duration_ms, total_tokens, total_cost_usd, score, started_at, finished_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -184,6 +193,7 @@ export class Storage {
         run.status,
         run.terminationReason,
         run.finalOutput,
+        run.suiteBatchId ?? null,
         run.totalSteps,
         run.totalToolCalls,
         run.durationMs,
@@ -279,6 +289,7 @@ export class Storage {
     return this.db
       .prepare(
         `SELECT r.id, r.scenario_id as scenarioId, s.suite, r.agent_version_id as agentVersionId,
+                r.suite_batch_id as suiteBatchId,
                 av.label as agentLabel, av.provider, av.model_id as modelId,
                 r.status, r.score, r.duration_ms as durationMs, r.total_steps as totalSteps,
                 r.started_at as startedAt
@@ -397,44 +408,85 @@ export class Storage {
       throw new Error(`Run '${candidateRunId}' not found.`);
     }
 
-    if (baseline.run.scenarioId !== candidate.run.scenarioId) {
-      throw new Error("Runs can only be compared when they share the same scenario id.");
+    return compareRunBundles(baseline, candidate);
+  }
+
+  compareSuites(baselineBatchId: string, candidateBatchId: string): SuiteComparison {
+    const baselineRuns = this.getRunsBySuiteBatchId(baselineBatchId);
+    const candidateRuns = this.getRunsBySuiteBatchId(candidateBatchId);
+    if (baselineRuns.length === 0) {
+      throw new Error(`No runs found for suite batch '${baselineBatchId}'.`);
     }
-    if (baseline.run.scenarioFileHash !== candidate.run.scenarioFileHash) {
-      throw new Error("Runs can only be compared when they share the same scenario file hash.");
+    if (candidateRuns.length === 0) {
+      throw new Error(`No runs found for suite batch '${candidateBatchId}'.`);
     }
+
+    const baselineSuites = new Set(baselineRuns.map((bundle) => deriveSuiteName(bundle.run.scenarioId)));
+    const candidateSuites = new Set(candidateRuns.map((bundle) => deriveSuiteName(bundle.run.scenarioId)));
+    if (baselineSuites.size !== 1) {
+      throw new Error(`Suite batch '${baselineBatchId}' contains runs from multiple suites.`);
+    }
+    if (candidateSuites.size !== 1) {
+      throw new Error(`Suite batch '${candidateBatchId}' contains runs from multiple suites.`);
+    }
+
+    const suite = [...baselineSuites][0] ?? "unknown";
+    const candidateSuite = [...candidateSuites][0] ?? "unknown";
+    if (suite !== candidateSuite) {
+      throw new Error(`Suite batches can only be compared when they share the same suite. Got '${suite}' and '${candidateSuite}'.`);
+    }
+
+    const baselineMap = new Map(baselineRuns.map((bundle) => [bundle.run.scenarioId, bundle]));
+    const candidateMap = new Map(candidateRuns.map((bundle) => [bundle.run.scenarioId, bundle]));
+    const sharedScenarioIds = [...baselineMap.keys()].filter((scenarioId) => candidateMap.has(scenarioId)).sort();
+
+    const comparisons: SuiteScenarioComparison[] = sharedScenarioIds.map((scenarioId) => ({
+      scenarioId,
+      comparison: compareRunBundles(baselineMap.get(scenarioId)!, candidateMap.get(scenarioId)!),
+    }));
+
+    const regressions = comparisons.filter((entry) => entry.comparison.classification === "regressed");
+    const improvements = comparisons.filter((entry) => entry.comparison.classification === "improved");
+    const unchanged = comparisons.filter((entry) => !["regressed", "improved"].includes(entry.comparison.classification));
+
+    const baselineStats = summarizeRuns(baselineRuns);
+    const candidateStats = summarizeRuns(candidateRuns);
+    const missingFromCandidate = [...baselineMap.keys()].filter((scenarioId) => !candidateMap.has(scenarioId)).sort();
+    const missingFromBaseline = [...candidateMap.keys()].filter((scenarioId) => !baselineMap.has(scenarioId)).sort();
 
     const notes: string[] = [];
-    if (baseline.run.status !== candidate.run.status) {
-      notes.push(`Verdict changed: ${baseline.run.status} -> ${candidate.run.status}`);
+    if (regressions.length > 0) {
+      notes.push(`${regressions.length} scenario regressions detected.`);
     }
-    if (baseline.run.score !== candidate.run.score) {
-      notes.push(`Score changed: ${baseline.run.score} -> ${candidate.run.score}`);
+    if (improvements.length > 0) {
+      notes.push(`${improvements.length} scenario improvements detected.`);
     }
-    if (baseline.run.totalSteps !== candidate.run.totalSteps) {
-      notes.push(`Steps changed: ${baseline.run.totalSteps} -> ${candidate.run.totalSteps}`);
+    if (missingFromCandidate.length > 0) {
+      notes.push(`${missingFromCandidate.length} scenarios missing from candidate batch.`);
     }
-    if (baseline.run.durationMs !== candidate.run.durationMs) {
-      notes.push(`Runtime changed: ${baseline.run.durationMs}ms -> ${candidate.run.durationMs}ms`);
+    if (missingFromBaseline.length > 0) {
+      notes.push(`${missingFromBaseline.length} scenarios missing from baseline batch.`);
     }
-    if (baseline.run.terminationReason !== candidate.run.terminationReason) {
-      notes.push(`Termination changed: ${baseline.run.terminationReason} -> ${candidate.run.terminationReason}`);
-    }
-
-    const evaluatorDiffs = buildEvaluatorDiffs(baseline, candidate);
-    const toolDiffs = buildToolDiffs(baseline, candidate);
 
     return {
-      baseline,
-      candidate,
+      suite,
+      baselineBatchId,
+      candidateBatchId,
+      classification: regressions.length > 0 ? "regressed" : improvements.length > 0 ? "improved" : notes.length > 0 ? "mixed" : "unchanged",
       notes,
       deltas: {
-        score: candidate.run.score - baseline.run.score,
-        runtimeMs: candidate.run.durationMs - baseline.run.durationMs,
-        steps: candidate.run.totalSteps - baseline.run.totalSteps,
+        pass: candidateStats.pass - baselineStats.pass,
+        fail: candidateStats.fail - baselineStats.fail,
+        error: candidateStats.error - baselineStats.error,
+        averageScore: candidateStats.averageScore - baselineStats.averageScore,
+        averageRuntimeMs: candidateStats.averageRuntimeMs - baselineStats.averageRuntimeMs,
+        averageSteps: candidateStats.averageSteps - baselineStats.averageSteps,
       },
-      evaluatorDiffs,
-      toolDiffs,
+      regressions,
+      improvements,
+      unchanged,
+      missingFromCandidate,
+      missingFromBaseline,
     };
   }
 
@@ -443,6 +495,7 @@ export class Storage {
       (this.db
         .prepare(
           `SELECT id, scenario_id as scenarioId, scenario_file_hash as scenarioFileHash, agent_version_id as agentVersionId,
+                  suite_batch_id as suiteBatchId,
                   status, termination_reason as terminationReason, final_output as finalOutput, total_steps as totalSteps,
                   total_tool_calls as totalToolCalls, duration_ms as durationMs, total_tokens as totalTokens,
                   total_cost_usd as totalCostUsd, score, started_at as startedAt, finished_at as finishedAt
@@ -493,6 +546,24 @@ export class Storage {
       this.db.exec(`ALTER TABLE agent_versions ADD COLUMN args_json TEXT`);
     }
   }
+
+  private ensureRunColumns(): void {
+    const columns = this.db.prepare(`PRAGMA table_info(runs)`).all() as Array<{ name: string }>;
+    const names = new Set(columns.map((column) => column.name));
+    if (!names.has("suite_batch_id")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN suite_batch_id TEXT`);
+    }
+  }
+
+  private getRunsBySuiteBatchId(suiteBatchId: string): RunBundle[] {
+    const runIds = this.db
+      .prepare(`SELECT id FROM runs WHERE suite_batch_id = ? ORDER BY scenario_id ASC`)
+      .all(suiteBatchId) as Array<{ id: string }>;
+
+    return runIds
+      .map((row) => this.getRun(row.id))
+      .filter((bundle): bundle is RunBundle => bundle !== null);
+  }
 }
 
 function buildEvaluatorDiffs(baseline: RunBundle, candidate: RunBundle): RunComparison["evaluatorDiffs"] {
@@ -509,14 +580,18 @@ function buildEvaluatorDiffs(baseline: RunBundle, candidate: RunBundle): RunComp
       if (baselineResult?.status === candidateResult?.status) {
         return null;
       }
+      const hardGate = baselineResult?.mode === "hard_gate" || candidateResult?.mode === "hard_gate";
       return {
         evaluatorId,
+        hardGate,
+        weight: candidateResult?.weight ?? baselineResult?.weight,
         baselineStatus: baselineResult?.status,
         candidateStatus: candidateResult?.status,
         note: `Evaluator '${evaluatorId}' changed: ${baselineResult?.status ?? "missing"} -> ${candidateResult?.status ?? "missing"}`,
       };
     })
-    .filter((diff): diff is NonNullable<typeof diff> => diff !== null);
+    .filter((diff): diff is NonNullable<typeof diff> => diff !== null)
+    .sort((left, right) => Number(right.hardGate) - Number(left.hardGate) || left.evaluatorId.localeCompare(right.evaluatorId));
 }
 
 function buildToolDiffs(baseline: RunBundle, candidate: RunBundle): RunComparison["toolDiffs"] {
@@ -533,12 +608,141 @@ function buildToolDiffs(baseline: RunBundle, candidate: RunBundle): RunCompariso
       if (baselineCount === candidateCount) {
         return null;
       }
-      return {
+      const diff: RunComparison["toolDiffs"][number] = {
         toolName,
         baselineCount,
         candidateCount,
+        risk: baselineCount === 0 && candidateCount > 0 ? "new_tool" : "none",
         note: `Tool '${toolName}' usage changed: ${baselineCount} -> ${candidateCount}`,
       };
+      return diff;
     })
     .filter((diff): diff is NonNullable<typeof diff> => diff !== null);
+}
+
+function compareRunBundles(baseline: RunBundle, candidate: RunBundle): RunComparison {
+  if (baseline.run.scenarioId !== candidate.run.scenarioId) {
+    throw new Error("Runs can only be compared when they share the same scenario id.");
+  }
+  if (baseline.run.scenarioFileHash !== candidate.run.scenarioFileHash) {
+    throw new Error("Runs can only be compared when they share the same scenario file hash.");
+  }
+
+  const notes: string[] = [];
+  const verdictDelta = `${baseline.run.status} -> ${candidate.run.status}`;
+  if (baseline.run.status !== candidate.run.status) {
+    notes.push(`Verdict changed: ${verdictDelta}`);
+  }
+  if (baseline.run.score !== candidate.run.score) {
+    notes.push(`Score changed: ${baseline.run.score} -> ${candidate.run.score}`);
+  }
+  if (baseline.run.totalSteps !== candidate.run.totalSteps) {
+    notes.push(`Steps changed: ${baseline.run.totalSteps} -> ${candidate.run.totalSteps}`);
+  }
+  if (baseline.run.durationMs !== candidate.run.durationMs) {
+    notes.push(`Runtime changed: ${baseline.run.durationMs}ms -> ${candidate.run.durationMs}ms`);
+  }
+  if (baseline.run.terminationReason !== candidate.run.terminationReason) {
+    notes.push(`Termination changed: ${baseline.run.terminationReason} -> ${candidate.run.terminationReason}`);
+  }
+
+  const evaluatorDiffs = buildEvaluatorDiffs(baseline, candidate);
+  const toolDiffs = buildToolDiffs(baseline, candidate);
+  const hardGateRegression = evaluatorDiffs.some((diff) => diff.hardGate && diff.baselineStatus === "pass" && diff.candidateStatus === "fail");
+  const scoreDelta = candidate.run.score - baseline.run.score;
+  const runtimeDeltaMs = candidate.run.durationMs - baseline.run.durationMs;
+  const stepDelta = candidate.run.totalSteps - baseline.run.totalSteps;
+  const runtimePct = baseline.run.durationMs === 0 ? 0 : Math.round((runtimeDeltaMs / baseline.run.durationMs) * 100);
+  const outputChanged = baseline.run.finalOutput !== candidate.run.finalOutput;
+  if (outputChanged) {
+    notes.push("Final output changed.");
+  }
+
+  return {
+    baseline,
+    candidate,
+    classification: classifyComparison({
+      baselineStatus: baseline.run.status,
+      candidateStatus: candidate.run.status,
+      scoreDelta,
+      runtimePct,
+      stepDelta,
+      hardGateRegression,
+    }),
+    verdictDelta,
+    terminationDelta:
+      baseline.run.terminationReason === candidate.run.terminationReason
+        ? undefined
+        : `${baseline.run.terminationReason} -> ${candidate.run.terminationReason}`,
+    outputChanged,
+    notes,
+    deltas: {
+      score: scoreDelta,
+      runtimeMs: runtimeDeltaMs,
+      steps: stepDelta,
+      runtimePct,
+    },
+    evaluatorDiffs,
+    toolDiffs,
+  };
+}
+
+function classifyComparison(input: {
+  baselineStatus: RunRecord["status"];
+  candidateStatus: RunRecord["status"];
+  scoreDelta: number;
+  runtimePct: number;
+  stepDelta: number;
+  hardGateRegression: boolean;
+}): RunComparison["classification"] {
+  if (
+    input.baselineStatus === "pass" &&
+    (input.candidateStatus !== "pass" || input.hardGateRegression || input.scoreDelta < -5 || input.runtimePct > 25 || input.stepDelta > 2)
+  ) {
+    return "regressed";
+  }
+  if (input.baselineStatus !== "pass" && input.candidateStatus === "pass") {
+    return "improved";
+  }
+  if (
+    input.baselineStatus === input.candidateStatus &&
+    input.baselineStatus === "pass" &&
+    input.scoreDelta >= 0 &&
+    input.runtimePct <= 25 &&
+    input.stepDelta <= 2 &&
+    !input.hardGateRegression
+  ) {
+    return "unchanged_pass";
+  }
+  if (input.baselineStatus === input.candidateStatus && input.baselineStatus === "fail") {
+    return "unchanged_fail";
+  }
+  if (input.baselineStatus !== "pass" && input.candidateStatus !== "pass" && input.scoreDelta > 0) {
+    return "improved";
+  }
+  if (input.scoreDelta < -5 || input.runtimePct > 25 || input.stepDelta > 2 || input.hardGateRegression) {
+    return "regressed";
+  }
+  return "changed_non_terminal";
+}
+
+function summarizeRuns(runs: RunBundle[]): {
+  pass: number;
+  fail: number;
+  error: number;
+  averageScore: number;
+  averageRuntimeMs: number;
+  averageSteps: number;
+} {
+  const pass = runs.filter((bundle) => bundle.run.status === "pass").length;
+  const fail = runs.filter((bundle) => bundle.run.status === "fail").length;
+  const error = runs.filter((bundle) => bundle.run.status === "error").length;
+  const averageScore = runs.length === 0 ? 0 : Math.round(runs.reduce((sum, bundle) => sum + bundle.run.score, 0) / runs.length);
+  const averageRuntimeMs = runs.length === 0 ? 0 : Math.round(runs.reduce((sum, bundle) => sum + bundle.run.durationMs, 0) / runs.length);
+  const averageSteps = runs.length === 0 ? 0 : Math.round(runs.reduce((sum, bundle) => sum + bundle.run.totalSteps, 0) / runs.length);
+  return { pass, fail, error, averageScore, averageRuntimeMs, averageSteps };
+}
+
+function deriveSuiteName(scenarioId: string): string {
+  return scenarioId.split(".")[0] ?? "unknown";
 }

@@ -4,6 +4,7 @@ type RunListItem = {
   id: string;
   scenarioId: string;
   suite: string;
+  suiteBatchId?: string;
   agentVersionId: string;
   agentLabel?: string;
   provider?: string;
@@ -43,14 +44,40 @@ type RunDetail = {
 type ComparePayload = {
   baseline: RunDetail;
   candidate: RunDetail;
+  classification: string;
+  verdictDelta: string;
+  terminationDelta?: string;
+  outputChanged: boolean;
   notes: string[];
   deltas: {
     score: number;
     runtimeMs: number;
     steps: number;
+    runtimePct: number;
   };
-  evaluatorDiffs: Array<{ evaluatorId: string; baselineStatus?: string; candidateStatus?: string; note: string }>;
-  toolDiffs: Array<{ toolName: string; baselineCount: number; candidateCount: number; note: string }>;
+  evaluatorDiffs: Array<{ evaluatorId: string; hardGate: boolean; weight?: number; baselineStatus?: string; candidateStatus?: string; note: string }>;
+  toolDiffs: Array<{ toolName: string; baselineCount: number; candidateCount: number; risk: string; note: string }>;
+};
+
+type SuiteComparisonPayload = {
+  suite: string;
+  baselineBatchId: string;
+  candidateBatchId: string;
+  classification: string;
+  notes: string[];
+  deltas: {
+    pass: number;
+    fail: number;
+    error: number;
+    averageScore: number;
+    averageRuntimeMs: number;
+    averageSteps: number;
+  };
+  regressions: Array<{ scenarioId: string; comparison: ComparePayload }>;
+  improvements: Array<{ scenarioId: string; comparison: ComparePayload }>;
+  unchanged: Array<{ scenarioId: string; comparison: ComparePayload }>;
+  missingFromCandidate: string[];
+  missingFromBaseline: string[];
 };
 
 export function App(): React.JSX.Element {
@@ -67,6 +94,7 @@ export function App(): React.JSX.Element {
         {route.type === "list" ? <RunListPage /> : null}
         {route.type === "detail" ? <RunDetailPage runId={route.runId} /> : null}
         {route.type === "compare" ? <ComparePage baseline={route.baseline} candidate={route.candidate} /> : null}
+        {route.type === "compare-suite" ? <SuiteComparePage baselineBatch={route.baselineBatch} candidateBatch={route.candidateBatch} /> : null}
       </main>
     </div>
   );
@@ -147,6 +175,15 @@ function RunListPage(): React.JSX.Element {
                   {index > 0 && runs[index - 1].scenarioId === run.scenarioId ? (
                     <div className="muted">
                       <a href={`/compare?baseline=${runs[index - 1].id}&candidate=${run.id}`}>compare previous</a>
+                    </div>
+                  ) : null}
+                  {index > 0 &&
+                  runs[index - 1].suite === run.suite &&
+                  runs[index - 1].suiteBatchId &&
+                  run.suiteBatchId &&
+                  runs[index - 1].suiteBatchId !== run.suiteBatchId ? (
+                    <div className="muted">
+                      <a href={`/compare-suite?baselineBatch=${runs[index - 1].suiteBatchId}&candidateBatch=${run.suiteBatchId}`}>compare suite batch</a>
                     </div>
                   ) : null}
                 </td>
@@ -269,6 +306,7 @@ function ComparePage(props: { baseline?: string; candidate?: string }): React.JS
         <p>{data.baseline.run.scenarioId}</p>
       </div>
       <div className="stats">
+        <Stat label="Classification" value={data.classification} />
         <Stat label="Score delta" value={signed(data.deltas.score)} />
         <Stat label="Runtime delta" value={`${signed(data.deltas.runtimeMs)}ms`} />
         <Stat label="Step delta" value={signed(data.deltas.steps)} />
@@ -288,7 +326,7 @@ function ComparePage(props: { baseline?: string; candidate?: string }): React.JS
           {data.evaluatorDiffs.length === 0 ? <p className="muted">No evaluator changes.</p> : null}
           <ul className="stack">
             {data.evaluatorDiffs.map((diff) => (
-              <li key={diff.evaluatorId}>{diff.note}</li>
+              <li key={diff.evaluatorId}>{diff.note}{diff.hardGate ? " (hard gate)" : ""}</li>
             ))}
           </ul>
         </section>
@@ -340,6 +378,85 @@ function RunSide(props: { title: string; detail: RunDetail }): React.JSX.Element
   );
 }
 
+function SuiteComparePage(props: { baselineBatch?: string; candidateBatch?: string }): React.JSX.Element {
+  const [data, setData] = useState<SuiteComparisonPayload | null>(null);
+
+  useEffect(() => {
+    if (!props.baselineBatch || !props.candidateBatch) {
+      setData(null);
+      return;
+    }
+    const url = new URL("/api/compare-suite", window.location.origin);
+    url.searchParams.set("baselineBatch", props.baselineBatch);
+    url.searchParams.set("candidateBatch", props.candidateBatch);
+    void fetch(url)
+      .then((response) => response.json())
+      .then((payload) => setData(payload as SuiteComparisonPayload));
+  }, [props.baselineBatch, props.candidateBatch]);
+
+  if (!props.baselineBatch || !props.candidateBatch) {
+    return <EmptyState title="No suite comparison selected" description="Open the suite compare page with baseline and candidate batch ids." />;
+  }
+
+  if (!data) {
+    return <EmptyState title="Loading suite comparison" description="Fetching suite batches and computing regressions." />;
+  }
+
+  return (
+    <section>
+      <div className="hero">
+        <h1>Suite Compare</h1>
+        <p>{data.suite}</p>
+      </div>
+      <div className="stats">
+        <Stat label="Classification" value={data.classification} />
+        <Stat label="Pass delta" value={signed(data.deltas.pass)} />
+        <Stat label="Fail delta" value={signed(data.deltas.fail)} />
+        <Stat label="Score delta" value={signed(data.deltas.averageScore)} />
+        <Stat label="Runtime delta" value={`${signed(data.deltas.averageRuntimeMs)}ms`} />
+        <Stat label="Step delta" value={signed(data.deltas.averageSteps)} />
+      </div>
+      <section className="panel">
+        <h2>Notes</h2>
+        {data.notes.length === 0 ? <p className="muted">No suite-level notes recorded.</p> : null}
+        <ul className="stack">
+          {data.notes.map((note) => (
+            <li key={note}>{note}</li>
+          ))}
+        </ul>
+      </section>
+      <div className="panel-grid">
+        <ScenarioList title="Regressions" items={data.regressions} />
+        <ScenarioList title="Improvements" items={data.improvements} />
+      </div>
+      <section className="panel">
+        <h2>Missing scenarios</h2>
+        <p><strong>Missing from candidate:</strong> {data.missingFromCandidate.join(", ") || "None"}</p>
+        <p><strong>Missing from baseline:</strong> {data.missingFromBaseline.join(", ") || "None"}</p>
+      </section>
+    </section>
+  );
+}
+
+function ScenarioList(props: { title: string; items: Array<{ scenarioId: string; comparison: ComparePayload }> }): React.JSX.Element {
+  return (
+    <section className="panel">
+      <h2>{props.title}</h2>
+      {props.items.length === 0 ? <p className="muted">None.</p> : null}
+      <ul className="stack">
+        {props.items.map((item) => (
+          <li key={item.scenarioId}>
+            <strong>{item.scenarioId}</strong> <span className="muted">{item.comparison.classification}</span>
+            <div>
+              <a href={`/compare?baseline=${item.comparison.baseline.run.id}&candidate=${item.comparison.candidate.run.id}`}>open run compare</a>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function Stat(props: { label: string; value: React.ReactNode }): React.JSX.Element {
   return (
     <div className="stat">
@@ -365,10 +482,18 @@ function signed(value: number): string {
 function getRoute():
   | { type: "list" }
   | { type: "detail"; runId: string }
-  | { type: "compare"; baseline?: string; candidate?: string } {
+  | { type: "compare"; baseline?: string; candidate?: string }
+  | { type: "compare-suite"; baselineBatch?: string; candidateBatch?: string } {
   const url = new URL(window.location.href);
   if (url.pathname.startsWith("/runs/")) {
     return { type: "detail", runId: decodeURIComponent(url.pathname.slice("/runs/".length)) };
+  }
+  if (url.pathname === "/compare-suite") {
+    return {
+      type: "compare-suite",
+      baselineBatch: url.searchParams.get("baselineBatch") ?? undefined,
+      candidateBatch: url.searchParams.get("candidateBatch") ?? undefined,
+    };
   }
   if (url.pathname === "/compare") {
     return {

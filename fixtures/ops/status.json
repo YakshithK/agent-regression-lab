@@ -1,0 +1,12 @@
+[
+  {
+    "service": "payments-api",
+    "status": "degraded",
+    "owner": "payments-oncall"
+  },
+  {
+    "service": "search-api",
+    "status": "degraded",
+    "owner": "search-oncall"
+  }
+]
