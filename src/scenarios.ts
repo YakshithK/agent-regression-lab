@@ -5,7 +5,7 @@ import { parse } from "yaml";
 
 import { loadAgentLabConfig } from "./config.js";
 import { getBuiltinToolSpecs } from "./tools.js";
-import type { ScenarioDefinition, ScenarioSummary } from "./types.js";
+import type { ConversationScenarioDefinition, ScenarioDefinition, ScenarioSummary } from "./types.js";
 
 const SCENARIOS_ROOT = resolve("scenarios");
 
@@ -39,15 +39,30 @@ export function listScenarioFiles(root = SCENARIOS_ROOT): string[] {
 }
 
 export function listScenarios(): ScenarioSummary[] {
-  return listScenarioFiles().map((filePath) => {
-    const { definition } = loadScenarioByPath(filePath, getKnownToolNames());
-    return {
-      id: definition.id,
-      name: definition.name,
-      suite: definition.suite,
-      difficulty: definition.difficulty,
-      description: definition.description,
-    };
+  return listScenarioFiles().flatMap((filePath) => {
+    try {
+      const scenarioType = getScenarioType(filePath);
+      if (scenarioType === "conversation") {
+        const { definition } = loadConversationScenarioByPath(filePath);
+        return [{
+          id: definition.id,
+          name: definition.name,
+          suite: definition.suite,
+          difficulty: definition.difficulty,
+          description: definition.description,
+        }];
+      }
+      const { definition } = loadScenarioByPath(filePath, getKnownToolNames());
+      return [{
+        id: definition.id,
+        name: definition.name,
+        suite: definition.suite,
+        difficulty: definition.difficulty,
+        description: definition.description,
+      }];
+    } catch {
+      return [];
+    }
   });
 }
 
@@ -64,6 +79,7 @@ export function loadScenarioById(scenarioId: string): LoadedScenario {
 
 export function loadScenariosBySuite(suite: string): LoadedScenario[] {
   return listScenarioFiles()
+    .filter((filePath) => getScenarioType(filePath) === "task")
     .map((filePath) => loadScenarioByPath(filePath, getKnownToolNames()))
     .filter(({ definition }) => definition.suite === suite);
 }
@@ -185,4 +201,126 @@ function getKnownToolNames(): Set<string> {
     names.add(tool.name);
   }
   return names;
+}
+
+// --- Conversation scenario support ---
+
+type LoadedConversationScenario = {
+  definition: ConversationScenarioDefinition;
+  filePath: string;
+  fileHash: string;
+};
+
+export function getScenarioType(filePath: string): "task" | "conversation" {
+  const absolutePath = resolve(filePath);
+  const raw = readFileSync(absolutePath, "utf8");
+  const parsed = parse(raw) as unknown;
+  if (isObject(parsed) && parsed.type === "conversation") {
+    return "conversation";
+  }
+  return "task";
+}
+
+export function loadConversationScenarioByPath(filePath: string): LoadedConversationScenario {
+  const absolutePath = resolve(filePath);
+  const raw = readFileSync(absolutePath, "utf8");
+  const parsed = parse(raw) as unknown;
+  validateConversationScenario(parsed, absolutePath);
+  return {
+    definition: parsed as ConversationScenarioDefinition,
+    filePath: relative(process.cwd(), absolutePath),
+    fileHash: createHash("sha256").update(raw).digest("hex"),
+  };
+}
+
+export function loadConversationScenarioById(scenarioId: string): LoadedConversationScenario {
+  for (const filePath of listScenarioFiles()) {
+    const absolutePath = resolve(filePath);
+    const raw = readFileSync(absolutePath, "utf8");
+    const parsed = parse(raw) as Record<string, unknown>;
+    if (parsed.type === "conversation" && parsed.id === scenarioId) {
+      return loadConversationScenarioByPath(filePath);
+    }
+  }
+  throw new Error(`Conversation scenario '${scenarioId}' not found.`);
+}
+
+const VALID_CONVERSATION_EVALUATOR_TYPES = new Set([
+  "response_contains",
+  "response_not_contains",
+  "response_matches_regex",
+  "response_latency_max",
+  "step_count_max",
+  "exact_final_answer",
+  "final_answer_contains",
+]);
+
+function validateConversationEvaluatorList(evaluators: unknown, context: string, filePath: string): void {
+  if (!Array.isArray(evaluators)) {
+    throw new Error(`Conversation scenario '${filePath}' ${context} evaluators must be an array.`);
+  }
+  for (let i = 0; i < evaluators.length; i += 1) {
+    const ev = evaluators[i];
+    if (!isObject(ev)) {
+      throw new Error(`Conversation scenario '${filePath}' ${context} evaluator ${i} must be an object.`);
+    }
+    if (typeof ev.type !== "string" || !VALID_CONVERSATION_EVALUATOR_TYPES.has(ev.type)) {
+      throw new Error(
+        `Conversation scenario '${filePath}' ${context} evaluator ${i} has invalid type '${String(ev.type)}'. ` +
+          `Valid types: ${[...VALID_CONVERSATION_EVALUATOR_TYPES].join(", ")}.`,
+      );
+    }
+    if (ev.mode !== "hard_gate" && ev.mode !== "weighted") {
+      throw new Error(`Conversation scenario '${filePath}' ${context} evaluator ${i} must have mode: hard_gate or weighted.`);
+    }
+  }
+}
+
+function validateConversationScenario(
+  value: unknown,
+  filePath: string,
+): asserts value is ConversationScenarioDefinition {
+  if (!isObject(value)) {
+    throw new Error(`Scenario file '${filePath}' must contain a YAML object.`);
+  }
+
+  for (const field of ["id", "name", "suite"] as const) {
+    if (typeof value[field] !== "string" || (value[field] as string).length === 0) {
+      throw new Error(`Conversation scenario '${filePath}' is missing required string field '${field}'.`);
+    }
+  }
+
+  if (value.type !== "conversation") {
+    throw new Error(`Scenario file '${filePath}' does not have type: conversation.`);
+  }
+
+  if ("tools" in value) {
+    throw new Error(
+      `Conversation scenario '${filePath}' must not define 'tools'. HTTP agents manage their own tools internally.`,
+    );
+  }
+
+  if (!Array.isArray(value.steps) || value.steps.length === 0) {
+    throw new Error(`Conversation scenario '${filePath}' must define at least one step.`);
+  }
+
+  for (let i = 0; i < value.steps.length; i += 1) {
+    const step = value.steps[i];
+    if (!isObject(step)) {
+      throw new Error(`Conversation scenario '${filePath}' step ${i} must be an object.`);
+    }
+    if (step.role !== "user") {
+      throw new Error(`Conversation scenario '${filePath}' step ${i} must have role: user.`);
+    }
+    if (typeof step.message !== "string" || step.message.length === 0) {
+      throw new Error(`Conversation scenario '${filePath}' step ${i} must have a non-empty message.`);
+    }
+    if (step.evaluators !== undefined) {
+      validateConversationEvaluatorList(step.evaluators, `step ${i}`, filePath);
+    }
+  }
+
+  if (value.evaluators !== undefined) {
+    validateConversationEvaluatorList(value.evaluators, "end-of-run evaluators", filePath);
+  }
 }
