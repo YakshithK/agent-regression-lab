@@ -3,3 +3,4 @@ node_modules/
 artifacts/
 dist/
 *.db
+.codex
