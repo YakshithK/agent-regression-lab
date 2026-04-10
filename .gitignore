@@ -4,3 +4,4 @@ artifacts/
 dist/
 *.db
 .codex
+superpowers/

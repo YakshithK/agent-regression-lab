@@ -1,16 +1,30 @@
 # Agent Regression Lab
 
-Agent Regression Lab is a local-first evaluation harness for AI agents.
+Agent Regression Lab is the local-first regression spine for agent engineering teams.
 
-It gives you a repeatable way to define scenarios in YAML, run agents against deterministic tool surfaces, store traces and scores locally, and compare runs or suite batches over time.
+It gives teams a repeatable way to define expected agent behavior in YAML, replay it against deterministic tool surfaces or live HTTP agents, store traces and scores locally, and compare candidate behavior against known baselines over time.
 
-This is an alpha developer tool. It is ready for early technical users, but it is not a polished platform.
+This is a local-first alpha for early technical teams. It is strongest when used across one workflow spine:
+
+- debug a single scenario while building
+- validate a branch with a suite before merge
+- run curated golden suites before release
+- keep incident-derived scenarios as engineering memory
 
 ## Who It Is For
 
-- engineers building or debugging agent workflows
-- researchers who want repeatable local evals
-- teams that want a simple local regression harness before investing in heavier infrastructure
+- teams shipping prompt, model, tool, workflow, and memory changes
+- engineers who need repeatable before/after evidence instead of vibes
+- teams validating live HTTP agents as well as deterministic local scenarios
+- researchers and technical operators who want local control before adopting heavier hosted infrastructure
+
+## Why Teams Use It
+
+- catch regressions before merge or release
+- debug subtle behavioral changes with full traces
+- compare model, prompt, tool, and workflow changes against a known baseline
+- build a portfolio of golden workflows, historical regressions, and ugly edge cases
+- preserve engineering memory so old failures do not quietly return
 
 ## What It Supports Today
 
@@ -22,6 +36,15 @@ This is an alpha developer tool. It is ready for early technical users, but it i
 - SQLite-backed local run history under `artifacts/agentlab.db`
 - CLI commands to list, run, show, compare, and launch the UI
 - local web UI for run inspection, run comparison, and suite batch comparison
+
+## Workflow Spine
+
+Use this as the default product story:
+
+1. debug locally with one scenario
+2. validate a branch with a suite
+3. run curated golden suites before release
+4. keep incident-derived scenarios as permanent regression assets
 
 ## First 10 Minutes
 
@@ -157,6 +180,21 @@ Use this as the default mental model:
 5. compare two runs or two suite batches
 6. extend the setup with a named agent or repo-local tool when needed
 
+## Canonical Live HTTP Fixture
+
+`arl-test/` is the canonical live HTTP regression fixture in this repo.
+
+Use it to verify the production-like HTTP path end to end:
+
+```bash
+cd arl-test
+npm start
+node ../dist/index.js list scenarios
+node ../dist/index.js run order-tracking-in-transit --agent support-agent
+```
+
+The `arl-test` scenarios are intended to behave like a real internal-team regression fixture, not just a toy demo.
+
 ## Config And Extension Points
 
 `agentlab.config.yaml` is the public extension point for:
@@ -214,11 +252,15 @@ Agent behavior can still vary depending on the provider path. The built-in `mock
 - custom tool loading is limited to repo-local module paths
 - external agents integrate through the local stdin/stdout protocol only
 - the UI is intentionally minimal and optimized for debugging
+- SQLite-backed local storage still makes sequential live verification the safest path when reusing the same local artifacts DB
 - the benchmark is broader than before, but still small compared to a mature benchmark product
 
 ## Next Docs
 
 - scenario authoring: [docs/scenarios.md](docs/scenarios.md)
+- golden suites: [docs/golden-suites.md](docs/golden-suites.md)
+- integrations and live services: [docs/integrations-and-live-services.md](docs/integrations-and-live-services.md)
+- memory and stateful agents: [docs/memory-and-stateful-agents.md](docs/memory-and-stateful-agents.md)
 - custom tools: [docs/tools.md](docs/tools.md)
 - named agents and external-process protocol: [docs/agents.md](docs/agents.md)
 - common failure modes: [docs/troubleshooting.md](docs/troubleshooting.md)

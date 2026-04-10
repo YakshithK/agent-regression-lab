@@ -29,6 +29,7 @@ Common optional fields:
 - `description`
 - `difficulty`
 - `tags`
+- `runtime_profile`
 - `runtime`
 - task `context`
 
@@ -74,6 +75,19 @@ evaluators:
         - ord_1024
 ```
 
+### Runtime Profiles
+
+Task scenarios can reference a named `runtime_profile` from `agentlab.config.yaml`.
+
+```yaml
+runtime_profile: timeout-orders-tool
+```
+
+Runtime profiles let you apply reusable degraded-tool conditions without duplicating them across scenarios. Current shipped behavior:
+
+- task scenarios: tool fault injection is active
+- conversation scenarios: config reference is allowed for shared authoring, but ARL does not yet inject faults into the HTTP agent's internal tools
+
 ### Evaluators
 
 Use deterministic evaluators only.
@@ -85,6 +99,9 @@ Use deterministic evaluators only.
 | `final_answer_contains` | Check that the final output contains required substrings |
 | `exact_final_answer` | Require an exact match on the final output |
 | `step_count_max` | Fail if the agent used more steps than allowed |
+| `tool_call_count_max` | Fail if the total number of tool calls exceeds a budget |
+| `tool_repeat_max` | Fail if one tool is overused |
+| `cost_max` | Fail if the run cost exceeds a configured USD budget |
 
 Evaluator modes:
 
@@ -116,6 +133,27 @@ tools:
 ```
 
 Keep the allowlist as narrow as possible. Broad allowlists weaken the benchmark.
+
+### Budget And Governance Checks
+
+Operational regressions are often just as important as correctness regressions. Use budget evaluators to encode "technically worked, but unacceptable in production":
+
+```yaml
+evaluators:
+  - id: total-tool-budget
+    type: tool_call_count_max
+    mode: hard_gate
+    config:
+      max: 2
+  - id: no-repeat-order-list
+    type: tool_repeat_max
+    mode: hard_gate
+    config:
+      tool: orders.list
+      max: 1
+```
+
+Use `cost_max` only where the run records cost metadata.
 
 ---
 
@@ -180,6 +218,15 @@ If a `hard_gate` per-step evaluator fails, the run stops immediately and remaini
 | `response_matches_regex` | `pattern: string` | Passes if the reply matches the regex pattern (case-insensitive) |
 | `response_latency_max` | `ms: number` | Passes if the HTTP response arrived within the time limit |
 
+### Scenario Quality Rules
+
+- prefer `hard_gate` for business-critical assertions
+- use `weighted` checks for quality gradients, not for the single condition that makes the scenario trustworthy
+- conversation scenarios must use `config.keywords` for `response_contains` and `response_not_contains`
+- stale `config.text` authoring is rejected
+- use conversation scenarios when the agent owns memory, tool execution, or conversation history internally
+- keep golden suites focused on repeatable workflows, historical regressions, and ugly edge cases rather than one-off demos
+
 ### End-of-Run Evaluators
 
 End-of-run evaluators run after all steps complete. They apply to the final reply.
@@ -221,6 +268,39 @@ state:
 ### Restrictions
 
 Conversation scenarios must not define a `tools:` field. HTTP agents manage their own tools internally. If `tools:` is present, validation will fail with a clear error.
+
+Conversation scenarios may define `runtime_profile`, but today that is for shared scenario organization and future stateful hooks. ARL does not inject tool faults into HTTP agents.
+
+---
+
+## Suite Definitions
+
+Scenario `suite` still groups related files, but operational launch workflows should use config-level `suite_definitions`.
+
+Example:
+
+```yaml
+suite_definitions:
+  - name: pre_merge
+    include:
+      tags:
+        - smoke
+        - regression
+```
+
+Run one with:
+
+```bash
+agentlab run --suite-def pre_merge --agent mock-default
+agentlab run --suite-def pre_merge --variant-set refund-agent-model-comparison
+```
+
+Use suite definitions for stable workflow units like:
+
+- `smoke`
+- `pre_merge`
+- `release`
+- `incident_regressions`
 
 ### Full Example
 

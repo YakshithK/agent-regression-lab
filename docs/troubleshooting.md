@@ -56,6 +56,7 @@ Current built-in suites in this repo include:
 - `coding`
 - `research`
 - `ops`
+- `internal-teams`
 
 ---
 
@@ -210,6 +211,24 @@ agents:
     url: http://localhost:3000/api/chat
     response_field: reply
 ```
+
+---
+
+## `database is locked`
+
+You hit SQLite write contention on the local artifacts DB.
+
+Most common cause:
+
+- multiple `agentlab` runs writing to the same `artifacts/agentlab.db` at the same time
+
+Fix:
+
+- wait for the current run to finish
+- rerun sequentially instead of in parallel
+- keep live HTTP fixture verification serialized when using the same local project directory
+
+The product now uses a busy timeout, but sequential execution is still the safest path for local live verification.
 
 ---
 

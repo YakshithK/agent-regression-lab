@@ -2,6 +2,9 @@ agents:
   - name: mock-default
     provider: mock
     label: mock-default
+  - name: mock-compact
+    provider: mock
+    label: mock-compact
   - name: openai-cheap
     provider: openai
     model: gpt-4o-mini
@@ -33,3 +36,64 @@ tools:
           description: Customer id to inspect for duplicated charges.
       required:
         - customer_id
+
+variant_sets:
+  - name: refund-agent-model-comparison
+    variants:
+      - agent: mock-default
+        label: baseline
+        prompt_version: prompt-v3
+        model_version: mock-model
+        tool_schema_version: support-tools-v1
+        config_label: baseline-refund-flow
+      - agent: mock-compact
+        label: concise
+        prompt_version: prompt-v4
+        model_version: mock-model
+        tool_schema_version: support-tools-v1
+        config_label: concise-refund-flow
+
+runtime_profiles:
+  - name: timeout-orders-tool
+    tool_faults:
+      - tool: orders.list
+        mode: timeout
+        timeout_ms: 1500
+  - name: malformed-docs-read
+    tool_faults:
+      - tool: docs.read
+        mode: malformed_output
+  - name: memory-seeded-followup
+    state:
+      reset: per_run
+      seeded_messages:
+        - role: user
+          message: "Remember that I prefer aisle seats."
+        - role: assistant
+          message: "Noted. You prefer aisle seats."
+      memory_blob:
+        seat_preference: aisle
+
+suite_definitions:
+  - name: smoke
+    include:
+      tags:
+        - smoke
+  - name: pre_merge
+    include:
+      tags:
+        - smoke
+        - regression
+  - name: release
+    include:
+      suites:
+        - support
+        - internal-teams
+    exclude:
+      tags:
+        - wip
+  - name: incident_regressions
+    include:
+      tags:
+        - incident
+        - regression

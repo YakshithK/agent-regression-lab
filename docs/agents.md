@@ -2,12 +2,21 @@
 
 Named agents are configured in `agentlab.config.yaml`.
 
+Agents remain the stable execution unit even when you introduce Tier 1 comparison features. You still run one named agent at a time, but you can now group multiple named agents into a `variant_set` for prompt/model/config comparisons.
+
 This repo supports four provider modes:
 
 - `mock`
 - `openai`
 - `external_process`
 - `http`
+
+Choose the simplest provider that answers the engineering question you actually have:
+
+- `mock` for deterministic harness verification
+- `openai` for real model behavior on deterministic tools
+- `external_process` for local agents where the runner should still own the tool loop
+- `http` for real running services that own their own memory and internal orchestration
 
 ## Named Agent Config
 
@@ -43,6 +52,15 @@ Run a named agent with:
 agentlab run support.refund-correct-order --agent mock-default
 agentlab run support.order-tracking --agent my-production-agent
 ```
+
+Use a named variant set when you want to run one scenario or one suite against multiple agent variants and compare the results later:
+
+```bash
+agentlab run support.refund-correct-order --variant-set refund-agent-model-comparison
+agentlab run --suite-def pre_merge --variant-set refund-agent-model-comparison
+```
+
+Each run records the underlying agent plus richer identity metadata such as `variant_label`, `prompt_version`, `model_version`, `tool_schema_version`, and `config_label`. Those fields appear in CLI summaries, `show`, stored run history, and the UI.
 
 ---
 
@@ -152,6 +170,10 @@ Unlike the other providers, HTTP agents manage their own conversation history an
 
 Use HTTP agents with `type: conversation` scenarios. See [scenarios.md](scenarios.md) for the conversation scenario format.
 
+This is the default choice when validating memoryful or stateful agents that already run as a service.
+
+HTTP agents can be included inside a `variant_set` the same way as other named agents. Runtime-profile fault injection is currently applied only to task/tool-loop runs. Conversation scenarios may still reference a runtime profile for reusable authoring, but ARL does not currently intercept internal HTTP-agent tools.
+
 ### Minimal Config
 
 ```yaml
@@ -248,6 +270,7 @@ Infrastructure errors (`http_connection_failed`, `http_error`, `timeout_exceeded
 - use http agents when your agent is already running as a service
 - keep the runner authoritative for tools and termination (external_process and mock)
 - keep your agent authoritative for tools and history (http)
+- choose the simplest provider that answers the engineering question you actually have
 
 ## Common Errors
 
