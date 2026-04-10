@@ -27,6 +27,10 @@ export class Storage {
     ensureParentDir(DB_PATH);
     this.db = new DatabaseSync(DB_PATH);
     this.db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA busy_timeout = 5000;
+    `);
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS metadata (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -52,6 +56,15 @@ export class Storage {
         provider TEXT,
         command TEXT,
         args_json TEXT,
+        variant_set_name TEXT,
+        variant_label TEXT,
+        prompt_version TEXT,
+        model_version TEXT,
+        tool_schema_version TEXT,
+        config_label TEXT,
+        config_hash TEXT,
+        runtime_profile_name TEXT,
+        suite_definition_name TEXT,
         config_json TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
@@ -62,6 +75,15 @@ export class Storage {
         scenario_file_hash TEXT NOT NULL,
         agent_version_id TEXT NOT NULL,
         suite_batch_id TEXT,
+        variant_set_name TEXT,
+        variant_label TEXT,
+        prompt_version TEXT,
+        model_version TEXT,
+        tool_schema_version TEXT,
+        config_label TEXT,
+        config_hash TEXT,
+        runtime_profile_name TEXT,
+        suite_definition_name TEXT,
         status TEXT NOT NULL,
         termination_reason TEXT NOT NULL,
         final_output TEXT NOT NULL,
@@ -154,14 +176,28 @@ export class Storage {
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `INSERT INTO agent_versions (id, label, model_id, provider, command, args_json, config_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO agent_versions (
+           id, label, model_id, provider, command, args_json,
+           variant_set_name, variant_label, prompt_version, model_version, tool_schema_version,
+           config_label, config_hash, runtime_profile_name, suite_definition_name,
+           config_json, created_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            label = excluded.label,
            model_id = excluded.model_id,
            provider = excluded.provider,
            command = excluded.command,
            args_json = excluded.args_json,
+           variant_set_name = excluded.variant_set_name,
+           variant_label = excluded.variant_label,
+           prompt_version = excluded.prompt_version,
+           model_version = excluded.model_version,
+           tool_schema_version = excluded.tool_schema_version,
+           config_label = excluded.config_label,
+           config_hash = excluded.config_hash,
+           runtime_profile_name = excluded.runtime_profile_name,
+           suite_definition_name = excluded.suite_definition_name,
            config_json = excluded.config_json`,
       )
       .run(
@@ -171,6 +207,15 @@ export class Storage {
         agentVersion.provider ?? null,
         agentVersion.command ?? null,
         JSON.stringify(agentVersion.args ?? []),
+        agentVersion.variantSetName ?? null,
+        agentVersion.variantLabel ?? null,
+        agentVersion.promptVersion ?? null,
+        agentVersion.modelVersion ?? null,
+        agentVersion.toolSchemaVersion ?? null,
+        agentVersion.configLabel ?? null,
+        agentVersion.configHash ?? null,
+        agentVersion.runtimeProfileName ?? null,
+        agentVersion.suiteDefinitionName ?? null,
         JSON.stringify(agentVersion.config),
         now,
       );
@@ -182,8 +227,10 @@ export class Storage {
       .prepare(
         `INSERT INTO runs (
           id, scenario_id, scenario_file_hash, agent_version_id, status, termination_reason, final_output,
-          suite_batch_id, total_steps, total_tool_calls, duration_ms, total_tokens, total_cost_usd, score, started_at, finished_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          suite_batch_id, variant_set_name, variant_label, prompt_version, model_version, tool_schema_version,
+          config_label, config_hash, runtime_profile_name, suite_definition_name,
+          total_steps, total_tool_calls, duration_ms, total_tokens, total_cost_usd, score, started_at, finished_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -194,6 +241,15 @@ export class Storage {
         run.terminationReason,
         run.finalOutput,
         run.suiteBatchId ?? null,
+        run.variantSetName ?? null,
+        run.variantLabel ?? null,
+        run.promptVersion ?? null,
+        run.modelVersion ?? null,
+        run.toolSchemaVersion ?? null,
+        run.configLabel ?? null,
+        run.configHash ?? null,
+        run.runtimeProfileName ?? null,
+        run.suiteDefinitionName ?? null,
         run.totalSteps,
         run.totalToolCalls,
         run.durationMs,
@@ -290,6 +346,7 @@ export class Storage {
       .prepare(
         `SELECT r.id, r.scenario_id as scenarioId, s.suite, r.agent_version_id as agentVersionId,
                 r.suite_batch_id as suiteBatchId,
+                r.variant_set_name as variantSetName, r.variant_label as variantLabel,
                 av.label as agentLabel, av.provider, av.model_id as modelId,
                 r.status, r.score, r.duration_ms as durationMs, r.total_steps as totalSteps,
                 r.started_at as startedAt
@@ -364,6 +421,11 @@ export class Storage {
     const agentVersion = this.db
       .prepare(
         `SELECT id, label, model_id as modelId, provider, command, args_json, config_json
+                , variant_set_name as variantSetName, variant_label as variantLabel,
+                prompt_version as promptVersion, model_version as modelVersion,
+                tool_schema_version as toolSchemaVersion, config_label as configLabel,
+                config_hash as configHash, runtime_profile_name as runtimeProfileName,
+                suite_definition_name as suiteDefinitionName
          FROM agent_versions WHERE id = ?`,
       )
       .get(run.agentVersionId) as
@@ -374,6 +436,15 @@ export class Storage {
           provider?: string;
           command?: string;
           args_json?: string;
+          variantSetName?: string;
+          variantLabel?: string;
+          promptVersion?: string;
+          modelVersion?: string;
+          toolSchemaVersion?: string;
+          configLabel?: string;
+          configHash?: string;
+          runtimeProfileName?: string;
+          suiteDefinitionName?: string;
           config_json: string;
         }
       | undefined;
@@ -391,6 +462,15 @@ export class Storage {
             provider: agentVersion.provider ?? undefined,
             command: agentVersion.command ?? undefined,
             args: agentVersion.args_json ? JSON.parse(agentVersion.args_json) : undefined,
+            variantSetName: agentVersion.variantSetName ?? undefined,
+            variantLabel: agentVersion.variantLabel ?? undefined,
+            promptVersion: agentVersion.promptVersion ?? undefined,
+            modelVersion: agentVersion.modelVersion ?? undefined,
+            toolSchemaVersion: agentVersion.toolSchemaVersion ?? undefined,
+            configLabel: agentVersion.configLabel ?? undefined,
+            configHash: agentVersion.configHash ?? undefined,
+            runtimeProfileName: agentVersion.runtimeProfileName ?? undefined,
+            suiteDefinitionName: agentVersion.suiteDefinitionName ?? undefined,
             config: JSON.parse(agentVersion.config_json),
           }
         : undefined,
@@ -495,7 +575,10 @@ export class Storage {
       (this.db
         .prepare(
           `SELECT id, scenario_id as scenarioId, scenario_file_hash as scenarioFileHash, agent_version_id as agentVersionId,
-                  suite_batch_id as suiteBatchId,
+                  suite_batch_id as suiteBatchId, variant_set_name as variantSetName, variant_label as variantLabel,
+                  prompt_version as promptVersion, model_version as modelVersion, tool_schema_version as toolSchemaVersion,
+                  config_label as configLabel, config_hash as configHash, runtime_profile_name as runtimeProfileName,
+                  suite_definition_name as suiteDefinitionName,
                   status, termination_reason as terminationReason, final_output as finalOutput, total_steps as totalSteps,
                   total_tool_calls as totalToolCalls, duration_ms as durationMs, total_tokens as totalTokens,
                   total_cost_usd as totalCostUsd, score, started_at as startedAt, finished_at as finishedAt
@@ -545,6 +628,33 @@ export class Storage {
     if (!names.has("args_json")) {
       this.db.exec(`ALTER TABLE agent_versions ADD COLUMN args_json TEXT`);
     }
+    if (!names.has("variant_set_name")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN variant_set_name TEXT`);
+    }
+    if (!names.has("variant_label")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN variant_label TEXT`);
+    }
+    if (!names.has("prompt_version")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN prompt_version TEXT`);
+    }
+    if (!names.has("model_version")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN model_version TEXT`);
+    }
+    if (!names.has("tool_schema_version")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN tool_schema_version TEXT`);
+    }
+    if (!names.has("config_label")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN config_label TEXT`);
+    }
+    if (!names.has("config_hash")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN config_hash TEXT`);
+    }
+    if (!names.has("runtime_profile_name")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN runtime_profile_name TEXT`);
+    }
+    if (!names.has("suite_definition_name")) {
+      this.db.exec(`ALTER TABLE agent_versions ADD COLUMN suite_definition_name TEXT`);
+    }
   }
 
   private ensureRunColumns(): void {
@@ -552,6 +662,33 @@ export class Storage {
     const names = new Set(columns.map((column) => column.name));
     if (!names.has("suite_batch_id")) {
       this.db.exec(`ALTER TABLE runs ADD COLUMN suite_batch_id TEXT`);
+    }
+    if (!names.has("variant_set_name")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN variant_set_name TEXT`);
+    }
+    if (!names.has("variant_label")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN variant_label TEXT`);
+    }
+    if (!names.has("prompt_version")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN prompt_version TEXT`);
+    }
+    if (!names.has("model_version")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN model_version TEXT`);
+    }
+    if (!names.has("tool_schema_version")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN tool_schema_version TEXT`);
+    }
+    if (!names.has("config_label")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN config_label TEXT`);
+    }
+    if (!names.has("config_hash")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN config_hash TEXT`);
+    }
+    if (!names.has("runtime_profile_name")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN runtime_profile_name TEXT`);
+    }
+    if (!names.has("suite_definition_name")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN suite_definition_name TEXT`);
     }
   }
 

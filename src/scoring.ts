@@ -8,9 +8,9 @@ export function computeScore(results: EvaluatorResult[]): { score: number; statu
 
   let score = 100;
   if (weighted.length > 0) {
-    const totalWeight = weighted.reduce((sum, result) => sum + (result.weight ?? 0), 0);
+    const totalWeight = weighted.reduce((sum, result) => sum + (result.weight ?? 1), 0);
     const earnedWeight = weighted.reduce((sum, result) => {
-      const weight = result.weight ?? 0;
+      const weight = result.weight ?? 1;
       return sum + (result.status === "pass" ? weight : 0);
     }, 0);
     score = totalWeight === 0 ? 100 : Math.round((earnedWeight / totalWeight) * 100);

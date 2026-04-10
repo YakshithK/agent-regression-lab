@@ -4,6 +4,21 @@ import { OpenAIResponsesAgentAdapter } from "./openaiResponsesAdapter.js";
 import { createAgentVersionId } from "../lib/id.js";
 import type { AgentAdapterFactory, AgentRuntimeConfig, AgentVersion } from "../types.js";
 
+function attachIdentityMetadata(version: AgentVersion, config: AgentRuntimeConfig): AgentVersion {
+  return {
+    ...version,
+    variantSetName: config.variantSetName,
+    variantLabel: config.variantLabel,
+    promptVersion: config.promptVersion,
+    modelVersion: config.modelVersion,
+    toolSchemaVersion: config.toolSchemaVersion,
+    configLabel: config.configLabel,
+    configHash: config.configHash,
+    runtimeProfileName: config.runtimeProfileName,
+    suiteDefinitionName: config.suiteDefinitionName,
+  };
+}
+
 class MockAgentAdapterFactory implements AgentAdapterFactory {
   createAdapter() {
     return new MockAgentAdapter();
@@ -12,13 +27,13 @@ class MockAgentAdapterFactory implements AgentAdapterFactory {
   createVersion(config: AgentRuntimeConfig): AgentVersion {
     const label = config.label ?? config.agentName ?? "mock-support-agent-v1";
     const payload = { adapter: "mock", domain: "support", agentName: config.agentName };
-    return {
+    return attachIdentityMetadata({
       id: createAgentVersionId(label, payload),
       label,
       modelId: "mock-model",
       provider: "mock",
       config: payload,
-    };
+    }, config);
   }
 }
 
@@ -33,13 +48,13 @@ class OpenAIAdapterFactory implements AgentAdapterFactory {
     const model = config.model ?? "gpt-4o-mini";
     const label = config.label ?? config.agentName ?? `openai-${model}`;
     const payload = { provider: "openai", model, agentName: config.agentName };
-    return {
+    return attachIdentityMetadata({
       id: createAgentVersionId(label, payload),
       label,
       modelId: model,
       provider: "openai",
       config: payload,
-    };
+    }, config);
   }
 }
 
@@ -60,14 +75,14 @@ class ExternalProcessAdapterFactory implements AgentAdapterFactory {
       args: config.args ?? [],
       agentName: config.agentName,
     };
-    return {
+    return attachIdentityMetadata({
       id: createAgentVersionId(label, payload),
       label,
       provider: "external_process",
       command: config.command,
       args: config.args ?? [],
       config: payload,
-    };
+    }, config);
   }
 }
 

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import packageJson from "../package.json" with { type: "json" };
+import { pathToFileURL } from "node:url";
 import { createAgentFactory } from "./agent/factory.js";
-import { getAgentRegistration } from "./config.js";
-import { createSuiteBatchId } from "./lib/id.js";
-import { getRunErrorDetail } from "./runOutput.js";
-import type { AgentRuntimeConfig, RunBundle } from "./types.js";
+import { getAgentRegistration, getVariantSet } from "./config.js";
+import { createConfigHash, createSuiteBatchId } from "./lib/id.js";
+import { formatCliErrorMessage, formatRunIdentityLines, getFailedEvaluatorSummaries, getRunErrorDetail } from "./runOutput.js";
+import type { AgentRuntimeConfig, RunBundle, VariantDefinition } from "./types.js";
 
 async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
@@ -45,6 +46,8 @@ function printUsage(): void {
   agentlab list scenarios
   agentlab run <scenario-id> [--agent <name>] [--provider mock|openai|external_process|http] [--model <model>] [--agent-label <label>]
   agentlab run --suite <suite-id> [--agent <name>] [--provider mock|openai|external_process|http] [--model <model>] [--agent-label <label>]
+  agentlab run --suite-def <name> [--agent <name>]
+  agentlab run <scenario-id> [--variant-set <name>]
   agentlab show <run-id>
   agentlab compare <baseline-run-id> <candidate-run-id>
   agentlab compare --suite <baseline-batch-id> <candidate-batch-id>
@@ -72,7 +75,14 @@ async function handleList(args: string[]): Promise<void> {
 async function handleRun(args: string[]): Promise<void> {
   const parsed = parseRunArgs(args);
   const runtimeConfig = validateRuntimeConfig(parsed.runtimeConfig);
-  const { loadScenariosBySuite } = await import("./scenarios.js");
+  const { loadScenariosBySuite, loadScenariosBySuiteDefinition } = await import("./scenarios.js");
+
+  if (parsed.suite && parsed.suiteDefinition) {
+    throw new Error("--suite and --suite-def cannot be used together.");
+  }
+  if (parsed.runtimeConfig.agentName && parsed.variantSetName) {
+    throw new Error("--agent and --variant-set cannot be used together.");
+  }
 
   if (parsed.suite) {
     const suite = parsed.suite;
@@ -83,17 +93,56 @@ async function handleRun(args: string[]): Promise<void> {
 
     const suiteBatchId = createSuiteBatchId();
     const runs: RunBundle[] = [];
-    for (const scenario of scenarios) {
-      runs.push(await executeOne(scenario.definition.id, runtimeConfig, suiteBatchId));
+    if (parsed.variantSetName) {
+      console.log(`Variant set: ${parsed.variantSetName}`);
+      for (const scenario of scenarios) {
+        runs.push(...await executeVariantSetScenario(scenario.definition.id, parsed.variantSetName, suiteBatchId));
+      }
+    } else {
+      for (const scenario of scenarios) {
+        runs.push(await executeOne(scenario.definition.id, runtimeConfig, suiteBatchId));
+      }
     }
 
     printSuiteSummary(suite, runs, suiteBatchId);
     return;
   }
 
+  if (parsed.suiteDefinition) {
+    const suiteDefinition = parsed.suiteDefinition;
+    const scenarios = loadScenariosBySuiteDefinition(suiteDefinition);
+    if (scenarios.length === 0) {
+      throw new Error(`No scenarios found for suite definition '${suiteDefinition}'.`);
+    }
+
+    const suiteBatchId = createSuiteBatchId();
+    const runs: RunBundle[] = [];
+    console.log(`Suite definition: ${suiteDefinition}`);
+    if (parsed.variantSetName) {
+      console.log(`Variant set: ${parsed.variantSetName}`);
+      for (const scenario of scenarios) {
+        runs.push(...await executeVariantSetScenario(scenario.definition.id, parsed.variantSetName, suiteBatchId, suiteDefinition));
+      }
+    } else {
+      const suiteRuntimeConfig = { ...runtimeConfig, suiteDefinitionName: suiteDefinition };
+      for (const scenario of scenarios) {
+        runs.push(await executeOne(scenario.definition.id, suiteRuntimeConfig, suiteBatchId));
+      }
+    }
+
+    printSuiteSummary(suiteDefinition, runs, suiteBatchId);
+    return;
+  }
+
   const scenarioId = parsed.scenarioId;
   if (!scenarioId) {
     throw new Error("Missing scenario id.");
+  }
+
+  if (parsed.variantSetName) {
+    console.log(`Variant set: ${parsed.variantSetName}`);
+    await executeVariantSetScenario(scenarioId, parsed.variantSetName);
+    return;
   }
 
   // Detect scenario type to route to the right runner
@@ -181,6 +230,15 @@ async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig,
     });
 
     bundle.run.suiteBatchId = suiteBatchId;
+    bundle.run.variantSetName = agentVersion.variantSetName;
+    bundle.run.variantLabel = agentVersion.variantLabel;
+    bundle.run.promptVersion = agentVersion.promptVersion;
+    bundle.run.modelVersion = agentVersion.modelVersion;
+    bundle.run.toolSchemaVersion = agentVersion.toolSchemaVersion;
+    bundle.run.configLabel = agentVersion.configLabel;
+    bundle.run.configHash = agentVersion.configHash;
+    bundle.run.runtimeProfileName = loaded.definition.runtime_profile;
+    bundle.run.suiteDefinitionName = runtimeConfig.suiteDefinitionName;
     bundle.agentVersion = agentVersion;
     storage.saveRun(bundle);
     printRunSummary(bundle);
@@ -188,6 +246,59 @@ async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig,
   } finally {
     storage.close();
   }
+}
+
+export async function executeVariantSetScenario(
+  scenarioId: string,
+  variantSetName: string,
+  suiteBatchId?: string,
+  suiteDefinitionName?: string,
+): Promise<RunBundle[]> {
+  const variantSet = getVariantSet(variantSetName);
+  const runs: RunBundle[] = [];
+
+  for (const variant of variantSet.variants) {
+    const registration = getAgentRegistration(variant.agent);
+    const runtimeConfig = buildVariantRuntimeConfig(registration, variantSet.name, variant, suiteDefinitionName);
+    runs.push(await executeOne(scenarioId, runtimeConfig, suiteBatchId));
+  }
+
+  return runs;
+}
+
+function buildVariantRuntimeConfig(
+  registration: ReturnType<typeof getAgentRegistration>,
+  variantSetName: string,
+  variant: VariantDefinition,
+  suiteDefinitionName?: string,
+): AgentRuntimeConfig {
+  const runtimeConfig: AgentRuntimeConfig = {
+    ...registration,
+    agentName: registration.name,
+    label: registration.label ?? variant.label,
+    variantSetName,
+    variantLabel: variant.label,
+    promptVersion: variant.prompt_version,
+    modelVersion: variant.model_version,
+    toolSchemaVersion: variant.tool_schema_version,
+    configLabel: variant.config_label,
+    suiteDefinitionName,
+  };
+  runtimeConfig.configHash = createConfigHash({
+    provider: runtimeConfig.provider,
+    agentName: runtimeConfig.agentName,
+    label: runtimeConfig.label,
+    model: runtimeConfig.model,
+    command: runtimeConfig.command,
+    args: runtimeConfig.args ?? [],
+    variantSetName,
+    variantLabel: variant.label,
+    promptVersion: variant.prompt_version,
+    modelVersion: variant.model_version,
+    toolSchemaVersion: variant.tool_schema_version,
+    configLabel: variant.config_label,
+  });
+  return runtimeConfig;
 }
 
 export async function executeConversation(
@@ -315,12 +426,22 @@ function printRunSummary(bundle: RunBundle): void {
   if (bundle.agentVersion?.command) {
     console.log(`Command: ${bundle.agentVersion.command} ${(bundle.agentVersion.args ?? []).join(" ")}`.trim());
   }
+  for (const line of formatRunIdentityLines(bundle)) {
+    console.log(line);
+  }
   console.log(`Runtime: ${bundle.run.durationMs}ms`);
   if (bundle.run.status !== "pass") {
     console.log(`Reason: ${bundle.run.terminationReason}`);
     const errorDetail = getRunErrorDetail(bundle);
     if (errorDetail) {
       console.log(`Error: ${errorDetail}`);
+    }
+    const failedEvaluators = getFailedEvaluatorSummaries(bundle);
+    if (failedEvaluators.length > 0) {
+      console.log("Failed evaluators:");
+      for (const summary of failedEvaluators) {
+        console.log(`- ${summary}`);
+      }
     }
   }
 }
@@ -459,16 +580,30 @@ function signedMetric(value: number): string {
 function parseRunArgs(args: string[]): {
   scenarioId?: string;
   suite?: string;
+  suiteDefinition?: string;
+  variantSetName?: string;
   runtimeConfig: AgentRuntimeConfig;
 } {
   const runtimeConfig: AgentRuntimeConfig = { provider: "mock" };
   let scenarioId: string | undefined;
   let suite: string | undefined;
+  let suiteDefinition: string | undefined;
+  let variantSetName: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--suite") {
       suite = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--suite-def") {
+      suiteDefinition = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--variant-set") {
+      variantSetName = args[index + 1];
       index += 1;
       continue;
     }
@@ -504,7 +639,7 @@ function parseRunArgs(args: string[]): {
     throw new Error(`Unexpected argument '${arg}'.`);
   }
 
-  return { scenarioId, suite, runtimeConfig };
+  return { scenarioId, suite, suiteDefinition, variantSetName, runtimeConfig };
 }
 
 function validateRuntimeConfig(config: AgentRuntimeConfig): AgentRuntimeConfig {
@@ -553,7 +688,18 @@ function validateRuntimeConfig(config: AgentRuntimeConfig): AgentRuntimeConfig {
 
   return config;
 }
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+if (isEntrypoint()) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(formatCliErrorMessage(message));
+    process.exitCode = 1;
+  });
+}
+
+function isEntrypoint(): boolean {
+  const entry = process.argv[1];
+  if (!entry) {
+    return false;
+  }
+  return import.meta.url === pathToFileURL(entry).href;
+}

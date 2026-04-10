@@ -3,7 +3,8 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 import { loadAgentLabConfig } from "./config.js";
-import type { ToolRegistration, ToolSpec } from "./types.js";
+import type { RuntimeProfileDefinition, ToolRegistration, ToolSpec } from "./types.js";
+import { TraceRecorder } from "./trace.js";
 
 export type ToolContext = {
   scenarioId: string;
@@ -15,6 +16,55 @@ export type LoadedTool = {
   spec: ToolSpec;
   handler: ToolHandler;
 };
+
+export function applyRuntimeProfileToTools(
+  tools: Record<string, ToolHandler>,
+  profile: RuntimeProfileDefinition | undefined,
+  trace: TraceRecorder,
+): Record<string, ToolHandler> {
+  if (!profile?.tool_faults?.length) {
+    return tools;
+  }
+
+  const wrapped = { ...tools };
+  for (const fault of profile.tool_faults) {
+    const original = wrapped[fault.tool];
+    if (!original) {
+      continue;
+    }
+
+    wrapped[fault.tool] = async (input, context) => {
+      trace.record(
+        "system",
+        "tool_fault_injected",
+        {
+          tool: fault.tool,
+          mode: fault.mode,
+        },
+        { countStep: false },
+      );
+
+      if (fault.mode === "timeout") {
+        await waitUnref(fault.timeout_ms ?? 5000);
+        const timeoutError = new Error(`Injected timeout for ${fault.tool}`);
+        (timeoutError as { code?: string }).code = "timeout_exceeded";
+        throw timeoutError;
+      }
+
+      if (fault.mode === "error") {
+        throw new Error(fault.error_message ?? `Injected failure for ${fault.tool}`);
+      }
+
+      if (fault.mode === "malformed_output") {
+        return "MALFORMED_OUTPUT";
+      }
+
+      return fault.partial_output ?? {};
+    };
+  }
+
+  return wrapped;
+}
 
 type Customer = {
   id: string;
@@ -452,4 +502,11 @@ function assertObject(value: unknown): asserts value is Record<string, unknown> 
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Tool input must be an object.");
   }
+}
+
+function waitUnref(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    timer.unref?.();
+  });
 }

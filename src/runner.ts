@@ -1,8 +1,10 @@
 import { performance } from "node:perf_hooks";
 
+import { getRuntimeProfile } from "./config.js";
 import { createToolCallId, createRunId } from "./lib/id.js";
 import { evaluateScenario } from "./evaluators.js";
 import { computeScore } from "./scoring.js";
+import { applyRuntimeProfileToTools } from "./tools.js";
 import { TraceRecorder } from "./trace.js";
 import type {
   AgentAdapter,
@@ -30,6 +32,8 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
   const runStart = performance.now();
   const trace = new TraceRecorder(runId, deps.scenario.id);
   const toolCalls: ToolCallRecord[] = [];
+  const runtimeProfile = deps.scenario.runtime_profile ? getRuntimeProfile(deps.scenario.runtime_profile) : undefined;
+  const tools = applyRuntimeProfileToTools(deps.tools, runtimeProfile, trace);
 
   const maxSteps = deps.scenario.runtime?.max_steps ?? 8;
   const timeoutSeconds = deps.scenario.runtime?.timeout_seconds;
@@ -44,6 +48,14 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
     maxSteps,
     timeoutSeconds,
   });
+  trace.record(
+    "system",
+    "runtime_profile_applied",
+    {
+      name: runtimeProfile?.name ?? null,
+    },
+    { countStep: false },
+  );
 
   const availableTools = deps.toolSpecs.filter((tool) => deps.scenario.tools.allowed.includes(tool.name));
 
@@ -104,7 +116,7 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
       break;
     }
 
-    const handler: ((input: unknown, context: { scenarioId: string }) => Promise<unknown>) | undefined = deps.tools[toolName];
+    const handler: ((input: unknown, context: { scenarioId: string }) => Promise<unknown>) | undefined = tools[toolName];
     if (!handler) {
       status = "error";
       terminationReason = "tool_error";
@@ -134,7 +146,8 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
       event = { type: "tool_result", toolName, result };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (deadline && Date.now() >= deadline) {
+      const isInjectedTimeout = error instanceof Error && (error as { code?: string }).code === "timeout_exceeded";
+      if (isInjectedTimeout || (deadline && Date.now() >= deadline)) {
         status = "error";
         terminationReason = "timeout_exceeded";
         trace.record("runner", "timeout_exceeded", { timeoutSeconds, message });
@@ -237,10 +250,18 @@ async function raceWithTimeout<T>(promise: Promise<T>, deadline: number | undefi
     throw new Error(message);
   }
 
-  return await Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      setTimeout(() => reject(new Error(message)), remainingMs);
-    }),
-  ]);
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error(message)), remainingMs);
+        timeoutHandle.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 }

@@ -3,17 +3,30 @@ import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
 import { parse } from "yaml";
 
-import { loadAgentLabConfig } from "./config.js";
+import { getRuntimeProfile, getSuiteDefinition, loadAgentLabConfig } from "./config.js";
 import { getBuiltinToolSpecs } from "./tools.js";
 import type { ConversationScenarioDefinition, ScenarioDefinition, ScenarioSummary } from "./types.js";
 
 const SCENARIOS_ROOT = resolve("scenarios");
+const VALID_TASK_EVALUATOR_TYPES = new Set([
+  "exact_final_answer",
+  "final_answer_contains",
+  "forbidden_tool",
+  "tool_call_assertion",
+  "step_count_max",
+  "tool_call_count_max",
+  "tool_repeat_max",
+  "cost_max",
+]);
+const VALID_EVALUATOR_MODES = new Set(["hard_gate", "weighted"]);
 
 type LoadedScenario = {
   definition: ScenarioDefinition;
   filePath: string;
   fileHash: string;
 };
+
+type LoadedScenarioRecord = LoadedScenario | LoadedConversationScenario;
 
 export function listScenarioFiles(root = SCENARIOS_ROOT): string[] {
   if (!safeExists(root)) {
@@ -85,6 +98,26 @@ export function loadScenariosBySuite(suite: string): LoadedScenario[] {
     .filter(({ definition }) => definition.suite === suite);
 }
 
+export function loadScenariosBySuiteDefinition(name: string): LoadedScenarioRecord[] {
+  const suiteDefinition = getSuiteDefinition(name);
+  const knownToolNames = getKnownToolNames();
+  const scenarioFiles = listScenarioFiles(resolve("scenarios"));
+  const loadedScenarios = scenarioFiles.map((filePath) => loadScenarioRecordByPath(filePath, knownToolNames));
+
+  const included = loadedScenarios
+    .filter(({ definition }) => matchesSuiteDefinitionInclude(definition, suiteDefinition));
+
+  const excludedIds = new Set(
+    loadedScenarios
+      .filter(({ definition }) => matchesSuiteDefinitionExclude(definition, suiteDefinition))
+      .map(({ definition }) => definition.id),
+  );
+
+  return included
+    .filter(({ definition }) => !excludedIds.has(definition.id))
+    .sort((left, right) => left.definition.id.localeCompare(right.definition.id));
+}
+
 export function loadScenarioByPath(filePath: string, knownToolNames = getKnownToolNames()): LoadedScenario {
   const absolutePath = resolve(filePath);
   const raw = readFileSync(absolutePath, "utf8");
@@ -130,7 +163,10 @@ function validateScenario(value: unknown, filePath: string, knownToolNames: Set<
       throw new Error(`Scenario file '${filePath}' references unknown allowed tool '${toolName}'.`);
     }
   }
-  if (Array.isArray(value.tools.forbidden)) {
+  if (value.tools.forbidden !== undefined) {
+    if (!Array.isArray(value.tools.forbidden)) {
+      throw new Error(`Scenario file '${filePath}' field 'tools.forbidden' must be an array of strings.`);
+    }
     for (const toolName of value.tools.forbidden) {
       if (typeof toolName !== "string") {
         throw new Error(`Scenario file '${filePath}' contains a non-string tool name in tools.forbidden.`);
@@ -147,6 +183,21 @@ function validateScenario(value: unknown, filePath: string, knownToolNames: Set<
     if (!isObject(evaluator) || typeof evaluator.id !== "string" || typeof evaluator.type !== "string") {
       throw new Error(`Scenario file '${filePath}' has an invalid evaluator entry.`);
     }
+    if (!VALID_TASK_EVALUATOR_TYPES.has(evaluator.type)) {
+      throw new Error(
+        `Scenario file '${filePath}' evaluator '${evaluator.id}' has invalid type '${evaluator.type}'. ` +
+          `Valid types: ${[...VALID_TASK_EVALUATOR_TYPES].join(", ")}.`,
+      );
+    }
+    if (!VALID_EVALUATOR_MODES.has(evaluator.mode)) {
+      throw new Error(
+        `Scenario file '${filePath}' evaluator '${evaluator.id}' has invalid mode '${String(evaluator.mode)}'. ` +
+          `Valid modes: hard_gate, weighted.`,
+      );
+    }
+    if (!isObject(evaluator.config)) {
+      throw new Error(`Scenario file '${filePath}' evaluator '${evaluator.id}' must define an object config.`);
+    }
 
     if (evaluatorIds.has(evaluator.id)) {
       throw new Error(`Scenario file '${filePath}' defines duplicate evaluator id '${evaluator.id}'.`);
@@ -157,6 +208,13 @@ function validateScenario(value: unknown, filePath: string, knownToolNames: Set<
   if (isObject(value.runtime)) {
     validatePositiveInt(value.runtime.max_steps, "runtime.max_steps", filePath);
     validatePositiveInt(value.runtime.timeout_seconds, "runtime.timeout_seconds", filePath);
+  }
+
+  if (value.runtime_profile !== undefined) {
+    if (typeof value.runtime_profile !== "string" || value.runtime_profile.length === 0) {
+      throw new Error(`Scenario file '${filePath}' field 'runtime_profile' must be a non-empty string.`);
+    }
+    getRuntimeProfile(value.runtime_profile);
   }
 
   if (isObject(value.context) && Array.isArray(value.context.fixtures)) {
@@ -274,6 +332,22 @@ function validateConversationEvaluatorList(evaluators: unknown, context: string,
     if (ev.mode !== "hard_gate" && ev.mode !== "weighted") {
       throw new Error(`Conversation scenario '${filePath}' ${context} evaluator ${i} must have mode: hard_gate or weighted.`);
     }
+
+    if (ev.type === "response_contains" || ev.type === "response_not_contains") {
+      if (!isObject(ev.config)) {
+        throw new Error(`Conversation scenario '${filePath}' ${context} evaluator ${i} must define an object config.`);
+      }
+      if ("text" in ev.config) {
+        throw new Error(
+          `Conversation scenario '${filePath}' ${context} evaluator ${i} uses stale 'config.text'; use 'config.keywords: string[]'.`,
+        );
+      }
+      if (!Array.isArray(ev.config.keywords) || ev.config.keywords.some((kw: unknown) => typeof kw !== "string")) {
+        throw new Error(
+          `Conversation scenario '${filePath}' ${context} evaluator ${i} must define config.keywords as a string array.`,
+        );
+      }
+    }
   }
 }
 
@@ -293,6 +367,13 @@ function validateConversationScenario(
 
   if (value.type !== "conversation") {
     throw new Error(`Scenario file '${filePath}' does not have type: conversation.`);
+  }
+
+  if (value.runtime_profile !== undefined) {
+    if (typeof value.runtime_profile !== "string" || value.runtime_profile.length === 0) {
+      throw new Error(`Conversation scenario '${filePath}' field 'runtime_profile' must be a non-empty string.`);
+    }
+    getRuntimeProfile(value.runtime_profile);
   }
 
   if ("tools" in value) {
@@ -324,4 +405,44 @@ function validateConversationScenario(
   if (value.evaluators !== undefined) {
     validateConversationEvaluatorList(value.evaluators, "end-of-run evaluators", filePath);
   }
+}
+
+function loadScenarioRecordByPath(filePath: string, knownToolNames = getKnownToolNames()): LoadedScenarioRecord {
+  if (getScenarioType(filePath) === "conversation") {
+    return loadConversationScenarioByPath(filePath);
+  }
+  return loadScenarioByPath(filePath, knownToolNames);
+}
+
+function matchesSuiteDefinitionInclude(
+  definition: { id: string; suite: string; tags?: string[] },
+  suiteDefinition: { include: { scenarios?: string[]; tags?: string[]; suites?: string[] } },
+): boolean {
+  return matchesSuiteDefinitionSelectors(definition, suiteDefinition.include);
+}
+
+function matchesSuiteDefinitionExclude(
+  definition: { id: string; suite: string; tags?: string[] },
+  suiteDefinition: { exclude?: { scenarios?: string[]; tags?: string[]; suites?: string[] } },
+): boolean {
+  return suiteDefinition.exclude !== undefined && matchesSuiteDefinitionSelectors(definition, suiteDefinition.exclude);
+}
+
+function matchesSuiteDefinitionSelectors(
+  definition: { id: string; suite: string; tags?: string[] },
+  selectors: { scenarios?: string[]; tags?: string[]; suites?: string[] },
+): boolean {
+  if (selectors.scenarios?.includes(definition.id)) {
+    return true;
+  }
+
+  if (selectors.tags?.some((tag) => definition.tags?.includes(tag) ?? false)) {
+    return true;
+  }
+
+  if (selectors.suites?.includes(definition.suite)) {
+    return true;
+  }
+
+  return false;
 }

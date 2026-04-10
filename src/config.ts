@@ -2,16 +2,23 @@ import { statSync, readFileSync } from "node:fs";
 import { resolve, relative, sep } from "node:path";
 import { parse } from "yaml";
 
-import type { AgentLabConfig, AgentRegistration, HttpAgentRegistration, ToolRegistration } from "./types.js";
-
-const CONFIG_PATH = resolve("agentlab.config.yaml");
+import type {
+  AgentLabConfig,
+  AgentRegistration,
+  HttpAgentRegistration,
+  RuntimeProfileDefinition,
+  SuiteDefinition,
+  ToolRegistration,
+  VariantSetDefinition,
+} from "./types.js";
 
 export function loadAgentLabConfig(): AgentLabConfig {
-  if (!exists(CONFIG_PATH)) {
+  const configPath = resolve("agentlab.config.yaml");
+  if (!exists(configPath)) {
     return {};
   }
 
-  const raw = readFileSync(CONFIG_PATH, "utf8");
+  const raw = readFileSync(configPath, "utf8");
   const parsed = parse(raw) as unknown;
   validateConfig(parsed);
   return parsed;
@@ -49,6 +56,54 @@ function validateConfig(value: unknown): asserts value is AgentLabConfig {
         throw new Error(`agentlab.config.yaml defines duplicate agent '${agent.name}'.`);
       }
       names.add(agent.name);
+    }
+  }
+
+  const agents = (value.agents ?? []) as Array<{ name: string }>;
+  const agentNames = new Set<string>(agents.map((agent) => agent.name));
+
+  if (value.variant_sets !== undefined) {
+    if (!Array.isArray(value.variant_sets)) {
+      throw new Error("agentlab.config.yaml field 'variant_sets' must be an array.");
+    }
+
+    const names = new Set<string>();
+    for (const variantSet of value.variant_sets) {
+      validateVariantSetDefinition(variantSet, agentNames);
+      if (names.has(variantSet.name)) {
+        throw new Error(`agentlab.config.yaml defines duplicate variant set '${variantSet.name}'.`);
+      }
+      names.add(variantSet.name);
+    }
+  }
+
+  if (value.runtime_profiles !== undefined) {
+    if (!Array.isArray(value.runtime_profiles)) {
+      throw new Error("agentlab.config.yaml field 'runtime_profiles' must be an array.");
+    }
+
+    const names = new Set<string>();
+    for (const runtimeProfile of value.runtime_profiles) {
+      validateRuntimeProfileDefinition(runtimeProfile);
+      if (names.has(runtimeProfile.name)) {
+        throw new Error(`agentlab.config.yaml defines duplicate runtime profile '${runtimeProfile.name}'.`);
+      }
+      names.add(runtimeProfile.name);
+    }
+  }
+
+  if (value.suite_definitions !== undefined) {
+    if (!Array.isArray(value.suite_definitions)) {
+      throw new Error("agentlab.config.yaml field 'suite_definitions' must be an array.");
+    }
+
+    const names = new Set<string>();
+    for (const suiteDefinition of value.suite_definitions) {
+      validateSuiteDefinition(suiteDefinition);
+      if (names.has(suiteDefinition.name)) {
+        throw new Error(`agentlab.config.yaml defines duplicate suite definition '${suiteDefinition.name}'.`);
+      }
+      names.add(suiteDefinition.name);
     }
   }
 }
@@ -170,6 +225,170 @@ export function getAgentRegistration(name: string): AgentRegistration {
     throw new Error(`agentlab.config.yaml does not define agent '${name}'.`);
   }
   return match;
+}
+
+export function getVariantSet(name: string): VariantSetDefinition {
+  const match = loadAgentLabConfig().variant_sets?.find((variantSet) => variantSet.name === name);
+  if (!match) {
+    throw new Error(`agentlab.config.yaml does not define variant set '${name}'.`);
+  }
+  return match;
+}
+
+export function getRuntimeProfile(name: string): RuntimeProfileDefinition {
+  const match = loadAgentLabConfig().runtime_profiles?.find((runtimeProfile) => runtimeProfile.name === name);
+  if (!match) {
+    throw new Error(`agentlab.config.yaml does not define runtime profile '${name}'.`);
+  }
+  return match;
+}
+
+export function getSuiteDefinition(name: string): SuiteDefinition {
+  const match = loadAgentLabConfig().suite_definitions?.find((suiteDefinition) => suiteDefinition.name === name);
+  if (!match) {
+    throw new Error(`agentlab.config.yaml does not define suite definition '${name}'.`);
+  }
+  return match;
+}
+
+function validateVariantSetDefinition(value: unknown, agentNames: Set<string>): asserts value is VariantSetDefinition {
+  if (!isObject(value)) {
+    throw new Error("Each variant set definition in agentlab.config.yaml must be an object.");
+  }
+
+  if (typeof value.name !== "string" || value.name.length === 0) {
+    throw new Error("Each variant set definition must define a non-empty 'name'.");
+  }
+
+  if (!Array.isArray(value.variants)) {
+    throw new Error(`Variant set '${value.name}' must define a 'variants' array.`);
+  }
+
+  const labels = new Set<string>();
+  for (const variant of value.variants) {
+    if (!isObject(variant)) {
+      throw new Error(`Variant set '${value.name}' contains a non-object variant definition.`);
+    }
+    if (typeof variant.agent !== "string" || variant.agent.length === 0) {
+      throw new Error(`Variant set '${value.name}' contains a variant with a non-empty 'agent' required.`);
+    }
+    if (!agentNames.has(variant.agent)) {
+      throw new Error(`Variant set '${value.name}' references unknown agent '${variant.agent}'.`);
+    }
+    if (typeof variant.label !== "string" || variant.label.length === 0) {
+      throw new Error(`Variant set '${value.name}' contains a variant with a non-empty 'label' required.`);
+    }
+    if (labels.has(variant.label)) {
+      throw new Error(`Variant set '${value.name}' defines duplicate variant label '${variant.label}'.`);
+    }
+    labels.add(variant.label);
+  }
+}
+
+function validateRuntimeProfileDefinition(value: unknown): asserts value is RuntimeProfileDefinition {
+  if (!isObject(value)) {
+    throw new Error("Each runtime profile definition in agentlab.config.yaml must be an object.");
+  }
+
+  if (typeof value.name !== "string" || value.name.length === 0) {
+    throw new Error("Each runtime profile definition must define a non-empty 'name'.");
+  }
+
+  if (value.tool_faults !== undefined) {
+    if (!Array.isArray(value.tool_faults)) {
+      throw new Error(`Runtime profile '${value.name}' field 'tool_faults' must be an array.`);
+    }
+
+    for (const fault of value.tool_faults) {
+      if (!isObject(fault)) {
+        throw new Error(`Runtime profile '${value.name}' contains a non-object tool fault definition.`);
+      }
+      if (typeof fault.tool !== "string" || fault.tool.length === 0) {
+        throw new Error(`Runtime profile '${value.name}' contains a tool fault with a non-empty 'tool' required.`);
+      }
+      if (fault.mode !== "timeout" && fault.mode !== "error" && fault.mode !== "malformed_output" && fault.mode !== "partial_output") {
+        throw new Error(`Runtime profile '${value.name}' uses invalid tool fault mode '${String(fault.mode)}'.`);
+      }
+      if (fault.error_message !== undefined && (typeof fault.error_message !== "string" || fault.error_message.length === 0)) {
+        throw new Error(`Runtime profile '${value.name}' tool fault for '${fault.tool}' field 'error_message' must be a non-empty string.`);
+      }
+      if (fault.timeout_ms !== undefined && (typeof fault.timeout_ms !== "number" || fault.timeout_ms <= 0)) {
+        throw new Error(`Runtime profile '${value.name}' tool fault for '${fault.tool}' field 'timeout_ms' must be a positive number.`);
+      }
+      if (fault.partial_output !== undefined && !isObject(fault.partial_output)) {
+        throw new Error(`Runtime profile '${value.name}' tool fault for '${fault.tool}' field 'partial_output' must be an object.`);
+      }
+    }
+  }
+
+  if (value.state !== undefined) {
+    if (!isObject(value.state)) {
+      throw new Error(`Runtime profile '${value.name}' field 'state' must be an object.`);
+    }
+    if (value.state.reset !== "per_run" && value.state.reset !== "per_variant_run" && value.state.reset !== "manual") {
+      throw new Error(`Runtime profile '${value.name}' field 'state.reset' must be one of 'per_run', 'per_variant_run', or 'manual'.`);
+    }
+    if (value.state.seeded_messages !== undefined) {
+      if (!Array.isArray(value.state.seeded_messages)) {
+        throw new Error(`Runtime profile '${value.name}' field 'state.seeded_messages' must be an array.`);
+      }
+      for (const message of value.state.seeded_messages) {
+        if (!isObject(message)) {
+          throw new Error(`Runtime profile '${value.name}' contains a non-object seeded message.`);
+        }
+        if (message.role !== "user" && message.role !== "assistant") {
+          throw new Error(`Runtime profile '${value.name}' seeded message role must be 'user' or 'assistant'.`);
+        }
+        if (typeof message.message !== "string" || message.message.length === 0) {
+          throw new Error(`Runtime profile '${value.name}' seeded message must define a non-empty 'message'.`);
+        }
+      }
+    }
+    if (value.state.memory_blob !== undefined && !isObject(value.state.memory_blob)) {
+      throw new Error(`Runtime profile '${value.name}' field 'state.memory_blob' must be an object.`);
+    }
+  }
+}
+
+function validateSuiteDefinition(value: unknown): asserts value is SuiteDefinition {
+  if (!isObject(value)) {
+    throw new Error("Each suite definition in agentlab.config.yaml must be an object.");
+  }
+
+  if (typeof value.name !== "string" || value.name.length === 0) {
+    throw new Error("Each suite definition must define a non-empty 'name'.");
+  }
+
+  if (!isObject(value.include)) {
+    throw new Error(`Suite definition '${value.name}' must define an object 'include'.`);
+  }
+
+  validateSuiteSelectorArray(value.include, value.name, "include.scenarios");
+  validateSuiteSelectorArray(value.include, value.name, "include.tags");
+  validateSuiteSelectorArray(value.include, value.name, "include.suites");
+
+  if (value.exclude !== undefined) {
+    if (!isObject(value.exclude)) {
+      throw new Error(`Suite definition '${value.name}' field 'exclude' must be an object.`);
+    }
+    validateSuiteSelectorArray(value.exclude, value.name, "exclude.scenarios");
+    validateSuiteSelectorArray(value.exclude, value.name, "exclude.tags");
+    validateSuiteSelectorArray(value.exclude, value.name, "exclude.suites");
+  }
+}
+
+function validateSuiteSelectorArray(
+  value: Record<string, unknown>,
+  suiteName: string,
+  key: "include.scenarios" | "include.tags" | "include.suites" | "exclude.scenarios" | "exclude.tags" | "exclude.suites",
+): void {
+  const fieldName = key.split(".")[1];
+  const selector = value[fieldName];
+  if (selector !== undefined) {
+    if (!Array.isArray(selector) || selector.some((item) => typeof item !== "string")) {
+      throw new Error(`Suite definition '${suiteName}' field '${key}' must be an array of strings.`);
+    }
+  }
 }
 
 function exists(path: string): boolean {

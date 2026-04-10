@@ -44,6 +44,7 @@ export type ConversationScenarioDefinition = {
   description?: string;
   tags?: string[];
   difficulty?: string;
+  runtime_profile?: string;
   state?: {
     conversation_id?: "auto";
   };
@@ -73,6 +74,51 @@ export type ToolRegistration = ToolSpec & {
   exportName?: string;
 };
 
+export type VariantDefinition = {
+  agent: string;
+  label: string;
+  prompt_version?: string;
+  model_version?: string;
+  tool_schema_version?: string;
+  config_label?: string;
+  notes?: string;
+};
+
+export type VariantSetDefinition = {
+  name: string;
+  variants: VariantDefinition[];
+};
+
+export type RuntimeProfileDefinition = {
+  name: string;
+  tool_faults?: Array<{
+    tool: string;
+    mode: "timeout" | "error" | "malformed_output" | "partial_output";
+    error_message?: string;
+    timeout_ms?: number;
+    partial_output?: Record<string, unknown>;
+  }>;
+  state?: {
+    seeded_messages?: Array<{ role: "user" | "assistant"; message: string }>;
+    memory_blob?: Record<string, unknown>;
+    reset: "per_run" | "per_variant_run" | "manual";
+  };
+};
+
+export type SuiteDefinition = {
+  name: string;
+  include: {
+    scenarios?: string[];
+    tags?: string[];
+    suites?: string[];
+  };
+  exclude?: {
+    scenarios?: string[];
+    tags?: string[];
+    suites?: string[];
+  };
+};
+
 export type ScenarioDefinition = {
   id: string;
   name: string;
@@ -80,6 +126,7 @@ export type ScenarioDefinition = {
   description?: string;
   tags?: string[];
   difficulty?: string;
+  runtime_profile?: string;
   task: {
     instructions: string;
     success_hint?: string;
@@ -109,7 +156,10 @@ export type ScenarioEvaluator = {
     | "final_answer_contains"
     | "forbidden_tool"
     | "tool_call_assertion"
-    | "step_count_max";
+    | "step_count_max"
+    | "tool_call_count_max"
+    | "tool_repeat_max"
+    | "cost_max";
   mode: EvaluatorMode;
   weight?: number;
   config: Record<string, unknown>;
@@ -122,6 +172,15 @@ export type AgentVersion = {
   provider?: string;
   command?: string;
   args?: string[];
+  variantSetName?: string;
+  variantLabel?: string;
+  promptVersion?: string;
+  modelVersion?: string;
+  toolSchemaVersion?: string;
+  configLabel?: string;
+  configHash?: string;
+  runtimeProfileName?: string;
+  suiteDefinitionName?: string;
   config: Record<string, unknown>;
 };
 
@@ -138,6 +197,15 @@ export type AgentRuntimeConfig = {
   response_field?: string;
   headers?: Record<string, string>;
   timeout_ms?: number;
+  variantSetName?: string;
+  variantLabel?: string;
+  promptVersion?: string;
+  modelVersion?: string;
+  toolSchemaVersion?: string;
+  configLabel?: string;
+  configHash?: string;
+  runtimeProfileName?: string;
+  suiteDefinitionName?: string;
 };
 
 export type AgentRunInput = {
@@ -171,6 +239,14 @@ export type AgentAdapterFactory = {
   createVersion(config: AgentRuntimeConfig): AgentVersion;
 };
 
+export type AgentLabConfig = {
+  tools?: ToolRegistration[];
+  agents?: AgentRegistration[];
+  variant_sets?: VariantSetDefinition[];
+  runtime_profiles?: RuntimeProfileDefinition[];
+  suite_definitions?: SuiteDefinition[];
+};
+
 export type TraceEvent = {
   eventId: string;
   runId: string;
@@ -187,15 +263,17 @@ export type TraceEvent = {
     | "agent_final_output"
     | "agent_error"
     | "tool_call_requested"
-    | "tool_call_started"
-    | "tool_call_completed"
-    | "tool_call_failed"
-    | "step_budget_exceeded"
-    | "forbidden_tool_attempted"
-    | "timeout_exceeded"
-    | "evaluation_started"
-    | "evaluation_result"
-    | "evaluation_finished"
+  | "tool_call_started"
+  | "tool_call_completed"
+  | "tool_call_failed"
+  | "tool_fault_injected"
+  | "step_budget_exceeded"
+  | "forbidden_tool_attempted"
+  | "timeout_exceeded"
+  | "runtime_profile_applied"
+  | "evaluation_started"
+  | "evaluation_result"
+  | "evaluation_finished"
     | "conversation_started"
     | "turn_started"
     | "turn_completed"
@@ -233,6 +311,15 @@ export type RunRecord = {
   scenarioFileHash: string;
   agentVersionId: string;
   suiteBatchId?: string;
+  variantSetName?: string;
+  variantLabel?: string;
+  promptVersion?: string;
+  modelVersion?: string;
+  toolSchemaVersion?: string;
+  configLabel?: string;
+  configHash?: string;
+  runtimeProfileName?: string;
+  suiteDefinitionName?: string;
   status: RunStatus;
   terminationReason: TerminationReason;
   finalOutput: string;
@@ -277,6 +364,8 @@ export type RunListItem = {
   agentLabel?: string;
   provider?: string;
   modelId?: string;
+  variantSetName?: string;
+  variantLabel?: string;
   status: RunStatus;
   score: number;
   durationMs: number;
@@ -339,11 +428,6 @@ export type SuiteComparison = {
   unchanged: SuiteScenarioComparison[];
   missingFromCandidate: string[];
   missingFromBaseline: string[];
-};
-
-export type AgentLabConfig = {
-  tools?: ToolRegistration[];
-  agents?: AgentRegistration[];
 };
 
 export type TaskAgentRegistration = {

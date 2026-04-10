@@ -21,6 +21,12 @@ function evaluateOne(evaluator: ScenarioEvaluator, bundle: RunBundle): Evaluator
       return evaluateExactFinalAnswer(evaluator, bundle.run.finalOutput);
     case "step_count_max":
       return evaluateStepCountMax(evaluator, bundle.run.totalSteps);
+    case "tool_call_count_max":
+      return evaluateToolCallCountMax(evaluator, bundle.run.totalToolCalls);
+    case "tool_repeat_max":
+      return evaluateToolRepeatMax(evaluator, bundle.toolCalls);
+    case "cost_max":
+      return evaluateCostMax(evaluator, bundle.run.totalCostUsd);
     default:
       return {
         evaluatorId: evaluator.id,
@@ -113,6 +119,57 @@ function evaluateStepCountMax(evaluator: ScenarioEvaluator, stepCount: number): 
     weight: evaluator.weight,
     rawScore: passed ? 1 : 0,
     message: passed ? `Step count ${stepCount} is within max ${max}.` : `Step count ${stepCount} exceeds max ${max}.`,
+  };
+}
+
+function evaluateToolCallCountMax(evaluator: ScenarioEvaluator, totalToolCalls: number): EvaluatorResult {
+  const max = Number(evaluator.config.max ?? 0);
+  const passed = totalToolCalls <= max;
+  return {
+    evaluatorId: evaluator.id,
+    evaluatorType: evaluator.type,
+    mode: evaluator.mode,
+    status: passed ? "pass" : "fail",
+    weight: evaluator.weight,
+    rawScore: passed ? 1 : 0,
+    message: passed
+      ? `Tool call count ${totalToolCalls} is within max ${max}.`
+      : `Tool call count ${totalToolCalls} exceeds max ${max}.`,
+  };
+}
+
+function evaluateToolRepeatMax(evaluator: ScenarioEvaluator, toolCalls: ToolCallRecord[]): EvaluatorResult {
+  const tool = String(evaluator.config.tool ?? "");
+  const max = Number(evaluator.config.max ?? 0);
+  const count = toolCalls.filter((call) => call.toolName === tool).length;
+  const passed = count <= max;
+  return {
+    evaluatorId: evaluator.id,
+    evaluatorType: evaluator.type,
+    mode: evaluator.mode,
+    status: passed ? "pass" : "fail",
+    weight: evaluator.weight,
+    rawScore: passed ? 1 : 0,
+    message: passed
+      ? `Tool '${tool}' usage count ${count} is within max ${max}.`
+      : `Tool '${tool}' usage count ${count} exceeds max ${max}.`,
+  };
+}
+
+function evaluateCostMax(evaluator: ScenarioEvaluator, totalCostUsd: number | undefined): EvaluatorResult {
+  const maxUsd = Number(evaluator.config.max_usd ?? 0);
+  const total = totalCostUsd ?? 0;
+  const passed = total <= maxUsd;
+  return {
+    evaluatorId: evaluator.id,
+    evaluatorType: evaluator.type,
+    mode: evaluator.mode,
+    status: passed ? "pass" : "fail",
+    weight: evaluator.weight,
+    rawScore: passed ? 1 : 0,
+    message: passed
+      ? `Total cost ${total} is within max ${maxUsd}.`
+      : `Total cost ${total} exceeds max ${maxUsd}.`,
   };
 }
 

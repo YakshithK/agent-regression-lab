@@ -5,6 +5,8 @@ type RunListItem = {
   scenarioId: string;
   suite: string;
   suiteBatchId?: string;
+  variantSetName?: string;
+  variantLabel?: string;
   agentVersionId: string;
   agentLabel?: string;
   provider?: string;
@@ -27,6 +29,15 @@ type RunDetail = {
     terminationReason: string;
     finalOutput: string;
     startedAt: string;
+    variantSetName?: string;
+    variantLabel?: string;
+    promptVersion?: string;
+    modelVersion?: string;
+    toolSchemaVersion?: string;
+    configLabel?: string;
+    configHash?: string;
+    runtimeProfileName?: string;
+    suiteDefinitionName?: string;
   };
   agentVersion?: {
     provider?: string;
@@ -34,6 +45,15 @@ type RunDetail = {
     label: string;
     command?: string;
     args?: string[];
+    variantSetName?: string;
+    variantLabel?: string;
+    promptVersion?: string;
+    modelVersion?: string;
+    toolSchemaVersion?: string;
+    configLabel?: string;
+    configHash?: string;
+    runtimeProfileName?: string;
+    suiteDefinitionName?: string;
   };
   evaluatorResults: Array<{ evaluatorId: string; status: string; message: string }>;
   toolCalls: Array<{ id: string; toolName: string; input: unknown; output?: unknown; status: string }>;
@@ -215,6 +235,7 @@ function RunDetailPage(props: { runId: string }): React.JSX.Element {
         <h1>{detail.run.id}</h1>
         <p>{detail.run.scenarioId}</p>
       </div>
+      <FailureSummaryPanel detail={detail} />
       <div className="stats">
         <Stat label="Status" value={<span className={`pill ${detail.run.status}`}>{detail.run.status}</span>} />
         <Stat label="Score" value={detail.run.score} />
@@ -226,6 +247,7 @@ function RunDetailPage(props: { runId: string }): React.JSX.Element {
           <h2>Summary</h2>
           <p><strong>Provider:</strong> {detail.agentVersion?.provider ?? "-"}</p>
           <p><strong>Model:</strong> {detail.agentVersion?.modelId ?? "-"}</p>
+          <RunIdentitySummary detail={detail} />
           {detail.agentVersion?.command ? (
             <p><strong>Command:</strong> {detail.agentVersion.command} {(detail.agentVersion.args ?? []).join(" ")}</p>
           ) : null}
@@ -272,6 +294,43 @@ function RunDetailPage(props: { runId: string }): React.JSX.Element {
         </ol>
       </section>
     </section>
+  );
+}
+
+export function FailureSummaryPanel(props: { detail: RunDetail }): React.JSX.Element | null {
+  const failureItems = getFailureSummaryItems(props.detail);
+  if (failureItems.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="panel">
+      <h2>Failures First</h2>
+      <p><strong>Status:</strong> <span className={`pill ${props.detail.run.status}`}>{props.detail.run.status}</span></p>
+      <p><strong>Termination:</strong> {props.detail.run.terminationReason}</p>
+      <ul className="stack">
+        {failureItems.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export function RunIdentitySummary(props: { detail: RunDetail }): React.JSX.Element {
+  const run = props.detail.run;
+
+  return (
+    <>
+      <p><strong>Variant set:</strong> {run.variantSetName ?? "-"}</p>
+      <p><strong>Variant:</strong> {run.variantLabel ?? "-"}</p>
+      <p><strong>Prompt version:</strong> {run.promptVersion ?? "-"}</p>
+      <p><strong>Model version:</strong> {run.modelVersion ?? "-"}</p>
+      <p><strong>Tool schema version:</strong> {run.toolSchemaVersion ?? "-"}</p>
+      <p><strong>Config label:</strong> {run.configLabel ?? "-"}</p>
+      <p><strong>Runtime profile:</strong> {run.runtimeProfileName ?? "-"}</p>
+      <p><strong>Suite definition:</strong> {run.suiteDefinitionName ?? "-"}</p>
+    </>
   );
 }
 
@@ -473,6 +532,25 @@ function EmptyState(props: { title: string; description: string }): React.JSX.El
       <p>{props.description}</p>
     </section>
   );
+}
+
+export function getFailureSummaryItems(detail: RunDetail): string[] {
+  const items: string[] = [];
+  if (detail.errorDetail) {
+    items.push(`Error: ${detail.errorDetail}`);
+  }
+
+  for (const result of detail.evaluatorResults) {
+    if (result.status === "fail") {
+      items.push(`Evaluator ${result.evaluatorId}: ${result.message}`);
+    }
+  }
+
+  if (detail.run.status !== "pass" && items.length === 0) {
+    items.push("Run did not pass. Inspect evaluator results and trace for the first divergence.");
+  }
+
+  return items;
 }
 
 function signed(value: number): string {

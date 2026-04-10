@@ -11,8 +11,11 @@ export class TraceRecorder {
     source: TraceEvent["source"],
     type: TraceEvent["type"],
     payload: Record<string, unknown>,
+    options?: { countStep?: boolean },
   ): void {
-    this.stepIndex += 1;
+    if (options?.countStep !== false) {
+      this.stepIndex += 1;
+    }
     this.events.push({
       eventId: createEventId(),
       runId: this.runId,

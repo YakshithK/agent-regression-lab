@@ -23,3 +23,7 @@ export function createToolCallId(): string {
 export function createAgentVersionId(label: string, config: Record<string, unknown>): string {
   return `agent_${hashText(`${label}:${JSON.stringify(config)}`).slice(0, 12)}`;
 }
+
+export function createConfigHash(input: Record<string, unknown>): string {
+  return createAgentVersionId("config", input);
+}
