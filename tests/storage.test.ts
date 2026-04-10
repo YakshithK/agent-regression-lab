@@ -79,6 +79,64 @@ test("compareRuns includes evaluator and tool diffs", () => {
   }
 });
 
+test("storage configures sqlite busy timeout to reduce lock errors", () => {
+  const storage = new Storage();
+  try {
+    const row = (storage as any).db.prepare("PRAGMA busy_timeout;").get() as { timeout?: number; busy_timeout?: number };
+    const timeout = row.timeout ?? row.busy_timeout ?? 0;
+    assert.ok(timeout > 0);
+  } finally {
+    storage.close();
+  }
+});
+
+test("storage preserves variant and config identity fields", () => {
+  const storage = new Storage();
+  try {
+    const richAgentVersion: AgentVersion = {
+      ...agentVersion,
+      id: `agent_storage_identity_${Date.now()}`,
+      variantSetName: "refund-agent-model-comparison",
+      variantLabel: "baseline",
+      promptVersion: "prompt-v3",
+      modelVersion: "mock-model-v1",
+      toolSchemaVersion: "refunds-v2",
+      configLabel: "baseline-config",
+      configHash: "cfg_test_hash",
+      runtimeProfileName: "timeout-orders-tool",
+      suiteDefinitionName: "pre_merge",
+    };
+    storage.upsertAgentVersion(richAgentVersion);
+
+    const bundle = makeBundle(`run_identity_${Date.now()}`, {
+      agentVersionId: richAgentVersion.id,
+      variantSetName: "refund-agent-model-comparison",
+      variantLabel: "baseline",
+      promptVersion: "prompt-v3",
+      modelVersion: "mock-model-v1",
+      toolSchemaVersion: "refunds-v2",
+      configLabel: "baseline-config",
+      configHash: "cfg_test_hash",
+      runtimeProfileName: "timeout-orders-tool",
+      suiteDefinitionName: "pre_merge",
+    });
+    bundle.agentVersion = richAgentVersion;
+
+    storage.saveRun(bundle);
+
+    const loaded = storage.getRun(bundle.run.id);
+    assert.equal(loaded?.run.variantLabel, "baseline");
+    assert.equal(loaded?.run.variantSetName, "refund-agent-model-comparison");
+    assert.equal(loaded?.run.configHash, "cfg_test_hash");
+    assert.equal(loaded?.run.runtimeProfileName, "timeout-orders-tool");
+    assert.equal(loaded?.run.suiteDefinitionName, "pre_merge");
+    assert.equal(loaded?.agentVersion?.promptVersion, "prompt-v3");
+    assert.equal(loaded?.agentVersion?.toolSchemaVersion, "refunds-v2");
+  } finally {
+    storage.close();
+  }
+});
+
 test("compareRuns rejects different scenario file hashes", () => {
   const storage = new Storage();
   try {

@@ -80,6 +80,25 @@ test("runner marks timeout_exceeded when a tool exceeds timeout_seconds", async 
   assert.ok(bundle.traceEvents.some((event) => event.type === "timeout_exceeded"));
 });
 
+test("runner records runtime_profile_applied when no profile is configured", async () => {
+  const bundle = await runScenario({
+    agentAdapter: noopAdapter,
+    agentVersion,
+    scenario: baseScenario,
+    scenarioFileHash: "hash_1",
+    toolSpecs,
+    tools: {
+      "support.wait": async () => ({ ok: true }),
+    },
+  });
+
+  const applied = bundle.traceEvents.find((event) => event.type === "runtime_profile_applied");
+  assert.ok(applied);
+  assert.equal(applied?.source, "system");
+  assert.equal(applied?.payload.name, null);
+  assert.equal(bundle.run.totalSteps, 8);
+});
+
 test("runner fails on forbidden tool attempts", async () => {
   const bundle = await runScenario({
     agentAdapter: {

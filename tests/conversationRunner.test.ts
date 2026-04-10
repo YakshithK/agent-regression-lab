@@ -210,3 +210,36 @@ test("runConversation trace includes conversation_started and conversation_finis
     server.close();
   }
 });
+
+test("runConversation fails when weighted evaluators fail without explicit weights", async () => {
+  const { server, port } = await startEchoServer(() => "missing expected wording");
+  try {
+    const scenario: ConversationScenarioDefinition = {
+      ...baseScenario,
+      steps: [
+        {
+          role: "user",
+          message: "Step 1",
+          evaluators: [
+            { type: "response_contains", mode: "weighted", config: { keywords: ["tracking"] } },
+          ],
+        },
+      ],
+    };
+    const httpConfig: HttpAgentRegistration = {
+      name: "test-agent",
+      provider: "http",
+      url: `http://localhost:${port}/chat`,
+    };
+    const bundle = await runConversation({
+      httpConfig,
+      agentVersion: makeAgentVersion(httpConfig.url),
+      scenario,
+      scenarioFileHash: "testhash",
+    });
+    assert.strictEqual(bundle.run.status, "fail");
+    assert.strictEqual(bundle.run.score, 0);
+  } finally {
+    server.close();
+  }
+});

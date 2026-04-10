@@ -48,3 +48,49 @@ test("final_answer_contains fails when keywords missing regardless of casing", (
   const results = evaluateScenario(bundle, [createEvaluator(bundle.run.finalOutput)]);
   assert.strictEqual(results[0].status, "fail");
 });
+
+test("tool_call_count_max fails when total tool calls exceed max", () => {
+  const bundle = makeBundle({ totalToolCalls: 4 });
+  bundle.toolCalls = [
+    { id: "1", stepIndex: 1, toolName: "orders.list", input: {}, status: "pass" },
+    { id: "2", stepIndex: 2, toolName: "orders.list", input: {}, status: "pass" },
+    { id: "3", stepIndex: 3, toolName: "orders.refund", input: {}, status: "pass" },
+    { id: "4", stepIndex: 4, toolName: "orders.refund", input: {}, status: "pass" },
+  ];
+  const results = evaluateScenario(bundle, [
+    { id: "budget", type: "tool_call_count_max", mode: "hard_gate", config: { max: 3 } },
+  ]);
+  assert.strictEqual(results[0].status, "fail");
+  assert.match(results[0].message, /exceeds max 3/);
+});
+
+test("tool_repeat_max fails when one tool is overused", () => {
+  const bundle = makeBundle({ totalToolCalls: 3 });
+  bundle.toolCalls = [
+    { id: "1", stepIndex: 1, toolName: "orders.list", input: {}, status: "pass" },
+    { id: "2", stepIndex: 2, toolName: "orders.list", input: {}, status: "pass" },
+    { id: "3", stepIndex: 3, toolName: "orders.list", input: {}, status: "pass" },
+  ];
+  const results = evaluateScenario(bundle, [
+    { id: "repeat", type: "tool_repeat_max", mode: "hard_gate", config: { tool: "orders.list", max: 2 } },
+  ]);
+  assert.strictEqual(results[0].status, "fail");
+  assert.match(results[0].message, /orders\.list.*exceeds max 2/);
+});
+
+test("cost_max fails when total cost exceeds max", () => {
+  const bundle = makeBundle({ totalCostUsd: 0.35 });
+  const results = evaluateScenario(bundle, [
+    { id: "cost", type: "cost_max", mode: "hard_gate", config: { max_usd: 0.25 } },
+  ]);
+  assert.strictEqual(results[0].status, "fail");
+  assert.match(results[0].message, /exceeds max 0\.25/);
+});
+
+test("tool_call_count_max passes when total tool calls are within max", () => {
+  const bundle = makeBundle({ totalToolCalls: 2 });
+  const results = evaluateScenario(bundle, [
+    { id: "budget-pass", type: "tool_call_count_max", mode: "hard_gate", config: { max: 3 } },
+  ]);
+  assert.strictEqual(results[0].status, "pass");
+});

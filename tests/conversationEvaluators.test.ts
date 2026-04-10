@@ -118,6 +118,22 @@ test("exact_final_answer fails on mismatch", () => {
   assert.strictEqual(results[0].status, "fail");
 });
 
+test("conversation evaluators keep operational checks scoped to step/turn semantics", () => {
+  const stepResults = evaluateStep(
+    "reply",
+    250,
+    [{ type: "response_latency_max", mode: "hard_gate", config: { ms: 300 } }],
+    0,
+  );
+  const endResults = evaluateConversationEnd(
+    "reply",
+    2,
+    [{ type: "step_count_max", mode: "hard_gate", config: { max: 3 } }],
+  );
+  assert.strictEqual(stepResults[0].status, "pass");
+  assert.strictEqual(endResults[0].status, "pass");
+});
+
 // --- evaluator ID generation ---
 
 test("evaluateStep generates deterministic evaluator IDs", () => {
