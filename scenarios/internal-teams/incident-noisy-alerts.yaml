@@ -1,0 +1,44 @@
+id: internal-teams.incident-noisy-alerts
+name: Triage Incident Under Noisy Alerts
+suite: internal-teams
+description: Ops agent should identify the real failing service and escalation target under noisy alert conditions.
+tags:
+  - internal-teams
+  - ops
+  - incident
+difficulty: medium
+task:
+  instructions: |
+    Triage the active alert stream and identify the service with the real customer-impacting issue.
+    Name the correct escalation target.
+context:
+  fixtures:
+    - fixtures/ops/alerts.json
+    - fixtures/ops/logs.json
+    - fixtures/ops/status.json
+    - fixtures/edge/alerts-noisy.json
+  variables:
+    service: payments-api
+tools:
+  allowed:
+    - alerts.list_active
+    - logs.query_service
+    - status.get_service
+runtime:
+  max_steps: 6
+evaluators:
+  - id: queried-payments-logs
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: logs.query_service
+      match:
+        service: payments-api
+  - id: final-answer-calls-right-owner
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - payments-oncall
+        - degraded

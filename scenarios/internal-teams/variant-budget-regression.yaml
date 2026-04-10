@@ -1,0 +1,59 @@
+id: internal-teams.variant-budget-regression
+name: Variant Budget Regression
+suite: internal-teams
+description: Support-agent variants should solve the duplicate-charge lookup without unnecessary tool churn.
+tags:
+  - internal-teams
+  - smoke
+  - regression
+  - budgets
+difficulty: easy
+task:
+  instructions: |
+    The customer says they were charged twice.
+    Identify the duplicated charge order id and explain which order should be refunded.
+    Do not issue the refund yet.
+context:
+  fixtures:
+    - fixtures/support/customers.json
+    - fixtures/support/orders.json
+  variables:
+    customer_email: alice@example.com
+tools:
+  allowed:
+    - crm.search_customer
+    - orders.list
+runtime:
+  max_steps: 4
+evaluators:
+  - id: listed-orders
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: orders.list
+      match:
+        customer_id: cus_100
+  - id: step-budget
+    type: step_count_max
+    mode: hard_gate
+    config:
+      max: 3
+  - id: total-tool-budget
+    type: tool_call_count_max
+    mode: hard_gate
+    config:
+      max: 2
+  - id: no-repeat-order-list
+    type: tool_repeat_max
+    mode: hard_gate
+    config:
+      tool: orders.list
+      max: 1
+  - id: final-answer-names-order
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - ord_1024
+        - duplicated

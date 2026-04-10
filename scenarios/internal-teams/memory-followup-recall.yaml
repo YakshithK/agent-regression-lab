@@ -1,0 +1,27 @@
+type: conversation
+id: internal-teams.memory-followup-recall
+name: Follow-Up Recall Within Conversation
+suite: internal-teams
+description: Memoryful agent should correctly recall a user-provided fact later in the same conversation.
+steps:
+  - role: user
+    message: "I'm traveling next Tuesday and I prefer aisle seats. Please remember that."
+    evaluators:
+      - type: response_contains
+        mode: weighted
+        config:
+          keywords:
+            - aisle
+  - role: user
+    message: "What seat preference did I mention earlier?"
+    evaluators:
+      - type: response_contains
+        mode: hard_gate
+        config:
+          keywords:
+            - aisle
+evaluators:
+  - type: step_count_max
+    mode: hard_gate
+    config:
+      max: 2

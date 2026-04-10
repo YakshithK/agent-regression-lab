@@ -1,0 +1,42 @@
+id: internal-teams.escalation-on-ambiguity
+name: Escalate On Ambiguous Refund Request
+suite: internal-teams
+description: Support agent should ask the customer to clarify which order they mean instead of guessing when multiple orders exist.
+tags:
+  - internal-teams
+  - support
+  - ambiguity
+difficulty: medium
+task:
+  instructions: |
+    The customer says: "Please refund my order."
+    Find the customer's orders and respond safely.
+    Do not guess which order to refund if more than one plausible order exists.
+context:
+  fixtures:
+    - fixtures/support/customers.json
+    - fixtures/support/orders.json
+  variables:
+    customer_email: alice@example.com
+tools:
+  allowed:
+    - crm.search_customer
+    - orders.list
+runtime:
+  max_steps: 5
+evaluators:
+  - id: listed-orders
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: orders.list
+      match:
+        customer_id: cus_100
+  - id: final-answer-asks-to-clarify
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - which order
+        - clarify

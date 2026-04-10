@@ -1,0 +1,14 @@
+[
+  {
+    "id": "noise_1",
+    "service": "search-api",
+    "severity": "low",
+    "summary": "Background reindex warning repeated after recovery"
+  },
+  {
+    "id": "noise_2",
+    "service": "email-worker",
+    "severity": "low",
+    "summary": "Retry queue depth elevated but draining"
+  }
+]

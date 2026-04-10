@@ -1,0 +1,41 @@
+id: internal-teams.tool-malformed-output
+name: Handle Partial Tool Evidence
+suite: internal-teams
+description: Research agent should acknowledge incomplete evidence instead of overstating confidence from partial documents.
+tags:
+  - internal-teams
+  - research
+  - malformed-tools
+difficulty: medium
+task:
+  instructions: |
+    Answer the policy question using the available documents.
+    If the documents are incomplete or ambiguous, say that clearly instead of overstating confidence.
+context:
+  fixtures:
+    - fixtures/research/documents.json
+    - fixtures/edge/tool-malformed-output.json
+  variables:
+    query: remote work
+tools:
+  allowed:
+    - docs.search
+    - docs.read
+runtime:
+  max_steps: 5
+evaluators:
+  - id: doc-read
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: docs.read
+      match:
+        doc_id: doc_remote_work
+  - id: final-answer-states-confidence
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - policy
+        - doc_remote_work

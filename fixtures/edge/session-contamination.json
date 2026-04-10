@@ -1,0 +1,4 @@
+{
+  "type": "cross_session_risk",
+  "description": "Fixture placeholder describing memory contamination risks between users or sessions."
+}

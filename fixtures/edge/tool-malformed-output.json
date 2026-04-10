@@ -1,0 +1,14 @@
+{
+  "type": "partial_document_snapshot",
+  "note": "Edge fixture for incomplete or malformed downstream evidence in research-style scenarios.",
+  "records": [
+    {
+      "id": "doc_remote_work_partial",
+      "status": "truncated",
+      "missing_sections": [
+        "exceptions",
+        "manager approval edge cases"
+      ]
+    }
+  ]
+}

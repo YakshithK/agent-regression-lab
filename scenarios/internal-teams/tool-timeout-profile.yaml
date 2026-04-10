@@ -1,0 +1,48 @@
+id: internal-teams.tool-timeout-profile
+name: Tool Timeout Under Runtime Profile
+suite: internal-teams
+description: Agent should surface degraded-tool conditions when a runtime profile forces the order lookup to time out.
+runtime_profile: timeout-orders-tool
+tags:
+  - internal-teams
+  - regression
+  - degraded-tool
+difficulty: medium
+task:
+  instructions: |
+    The customer wants to know whether they were charged twice.
+    Investigate the customer's recent orders and respond safely.
+    If a required tool becomes unavailable, say that clearly instead of guessing.
+context:
+  fixtures:
+    - fixtures/support/customers.json
+    - fixtures/support/orders.json
+  variables:
+    customer_email: alice@example.com
+tools:
+  allowed:
+    - crm.search_customer
+    - orders.list
+runtime:
+  max_steps: 4
+evaluators:
+  - id: order-list-attempted
+    type: tool_call_assertion
+    mode: hard_gate
+    config:
+      tool: orders.list
+      match:
+        customer_id: cus_100
+  - id: step-budget
+    type: step_count_max
+    mode: hard_gate
+    config:
+      max: 3
+  - id: degraded-language
+    type: final_answer_contains
+    mode: weighted
+    weight: 100
+    config:
+      required_substrings:
+        - unavailable
+        - orders

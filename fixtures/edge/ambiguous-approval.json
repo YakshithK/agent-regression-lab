@@ -1,0 +1,4 @@
+{
+  "type": "ambiguous_approval_request",
+  "description": "Fixture placeholder for workflows where the agent must escalate rather than guess on ambiguous approval authority."
+}
