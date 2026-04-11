@@ -54,7 +54,7 @@ agents:
 3. Run a conversation scenario:
 
 ```bash
-agentlab run support.order-tracking --agent my-agent
+agentlab run internal-teams.memory-followup-recall --agent my-agent
 ```
 
 4. Confirm the run produces a pass/fail result and the CLI output shows turn-by-turn step status
@@ -62,7 +62,7 @@ agentlab run support.order-tracking --agent my-agent
 If no live HTTP service is available, confirm the HTTP error paths work correctly:
 
 ```bash
-agentlab run support.order-tracking --agent my-agent
+agentlab run internal-teams.memory-followup-recall --agent my-agent
 # (with no service running)
 # Expected: status: error, terminationReason: http_connection_failed
 ```

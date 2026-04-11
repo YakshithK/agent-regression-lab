@@ -159,6 +159,8 @@ Supported command surface:
 agentlab list scenarios
 agentlab run <scenario-id> [--agent <name>]
 agentlab run --suite <suite-id> [--agent <name>]
+agentlab run --suite-def <name> [--agent <name>]
+agentlab run <scenario-id> [--variant-set <name>]
 agentlab show <run-id>
 agentlab compare <baseline-run-id> <candidate-run-id>
 agentlab compare --suite <baseline-batch-id> <candidate-batch-id>

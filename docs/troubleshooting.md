@@ -166,7 +166,7 @@ agents:
 Then run with:
 
 ```bash
-agentlab run support.order-tracking --agent my-agent
+agentlab run internal-teams.memory-followup-recall --agent my-agent
 ```
 
 ### `termination_reason: http_connection_failed`

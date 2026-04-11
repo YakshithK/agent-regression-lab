@@ -50,7 +50,7 @@ Run a named agent with:
 
 ```bash
 agentlab run support.refund-correct-order --agent mock-default
-agentlab run support.order-tracking --agent my-production-agent
+agentlab run internal-teams.memory-followup-recall --agent my-production-agent
 ```
 
 Use a named variant set when you want to run one scenario or one suite against multiple agent variants and compare the results later:

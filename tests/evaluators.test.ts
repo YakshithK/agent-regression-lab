@@ -94,3 +94,19 @@ test("tool_call_count_max passes when total tool calls are within max", () => {
   ]);
   assert.strictEqual(results[0].status, "pass");
 });
+
+test("step_count_max uses config.max (task scenarios)", () => {
+  const bundle = makeBundle({ totalSteps: 2 });
+  const results = evaluateScenario(bundle, [
+    { id: "steps", type: "step_count_max", mode: "hard_gate", config: { max: 3 } },
+  ]);
+  assert.strictEqual(results[0].status, "pass");
+});
+
+test("step_count_max still accepts config.max_steps for backwards compatibility", () => {
+  const bundle = makeBundle({ totalSteps: 4 });
+  const results = evaluateScenario(bundle, [
+    { id: "steps", type: "step_count_max", mode: "hard_gate", config: { max_steps: 3 } },
+  ]);
+  assert.strictEqual(results[0].status, "fail");
+});

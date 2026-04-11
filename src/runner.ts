@@ -240,6 +240,12 @@ function hasTimedOut(deadline?: number): boolean {
   return deadline !== undefined && Date.now() >= deadline;
 }
 
+function toolRaceTimeoutError(message: string): Error {
+  const error = new Error(message);
+  (error as { code?: string }).code = "timeout_exceeded";
+  return error;
+}
+
 async function raceWithTimeout<T>(promise: Promise<T>, deadline: number | undefined, message: string): Promise<T> {
   if (deadline === undefined) {
     return promise;
@@ -247,7 +253,7 @@ async function raceWithTimeout<T>(promise: Promise<T>, deadline: number | undefi
 
   const remainingMs = deadline - Date.now();
   if (remainingMs <= 0) {
-    throw new Error(message);
+    throw toolRaceTimeoutError(message);
   }
 
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -255,7 +261,7 @@ async function raceWithTimeout<T>(promise: Promise<T>, deadline: number | undefi
     return await Promise.race([
       promise,
       new Promise<T>((_, reject) => {
-        timeoutHandle = setTimeout(() => reject(new Error(message)), remainingMs);
+        timeoutHandle = setTimeout(() => reject(toolRaceTimeoutError(message)), remainingMs);
         timeoutHandle.unref?.();
       }),
     ]);

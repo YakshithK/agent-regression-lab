@@ -109,7 +109,8 @@ function evaluateExactFinalAnswer(evaluator: ScenarioEvaluator, finalOutput: str
 }
 
 function evaluateStepCountMax(evaluator: ScenarioEvaluator, stepCount: number): EvaluatorResult {
-  const max = Number(evaluator.config.max_steps ?? 0);
+  const rawMax = evaluator.config.max ?? evaluator.config.max_steps;
+  const max = Number(rawMax ?? 0);
   const passed = stepCount <= max;
   return {
     evaluatorId: evaluator.id,

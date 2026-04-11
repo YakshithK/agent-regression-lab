@@ -165,14 +165,14 @@ Conversation scenarios test HTTP agents through multi-turn dialogs. They require
 
 ```yaml
 type: conversation
-id: support.order-tracking
-name: Order Tracking Multi-Turn
-suite: support
+id: internal-teams.memory-followup-recall
+name: Follow-Up Recall Within Conversation
+suite: internal-teams
 steps:
   - role: user
-    message: "Where's my order #ORD-001?"
+    message: "I'm traveling next Tuesday and I prefer aisle seats. Please remember that."
   - role: user
-    message: "What's the tracking number?"
+    message: "What seat preference did I mention earlier?"
 ```
 
 Each step must have:
@@ -306,51 +306,45 @@ Use suite definitions for stable workflow units like:
 
 ```yaml
 type: conversation
-id: support.order-tracking
-name: Order Tracking Multi-Turn
-suite: support
-description: Multi-turn order status inquiry.
+id: internal-teams.memory-followup-recall
+name: Follow-Up Recall Within Conversation
+suite: internal-teams
+description: Memoryful agent should recall a user-provided fact later in the same conversation.
 difficulty: medium
 tags:
-  - support
+  - internal-teams
   - conversation
-
-state:
-  conversation_id: auto
 
 steps:
   - role: user
-    message: "Where's my order #ORD-001?"
+    message: "I'm traveling next Tuesday and I prefer aisle seats. Please remember that."
+    evaluators:
+      - type: response_contains
+        mode: weighted
+        config:
+          keywords:
+            - aisle
+
+  - role: user
+    message: "What seat preference did I mention earlier?"
     evaluators:
       - type: response_contains
         mode: hard_gate
         config:
-          keywords: [shipped, tracking]
-      - type: response_latency_max
-        mode: hard_gate
-        config:
-          ms: 3000
-
-  - role: user
-    message: "What's the tracking number?"
-    evaluators:
-      - type: response_not_contains
-        mode: weighted
-        weight: 1
-        config:
-          keywords: ["don't know", error]
+          keywords:
+            - aisle
 
 evaluators:
   - type: step_count_max
     mode: hard_gate
     config:
-      max: 10
+      max: 2
 ```
 
 Run it with:
 
 ```bash
-agentlab run support.order-tracking --agent my-production-agent
+agentlab run internal-teams.memory-followup-recall --agent my-production-agent
 ```
 
 Where `my-production-agent` is a named `http` agent in `agentlab.config.yaml`. See [agents.md](agents.md) for HTTP agent config.
@@ -360,18 +354,18 @@ Where `my-production-agent` is a named `http` agent in `agentlab.config.yaml`. S
 Conversation runs print a different output format from task runs:
 
 ```
-run support.order-tracking — PASS
+run internal-teams.memory-followup-recall — PASS
   agent: my-production-agent (http://localhost:3000/api/chat)
   turns completed: 2/2
-  step 1: pass (response_contains ✓, latency 240ms ✓)
-  step 2: pass (response_not_contains ✓)
+  step 1: pass (response_contains ✓)
+  step 2: pass (response_contains ✓)
   run id: run_20260407_001234
 ```
 
 If a hard-gate fails mid-run:
 
 ```
-run support.order-tracking — FAIL
+run internal-teams.memory-followup-recall — FAIL
   agent: my-production-agent (http://localhost:3000/api/chat)
   turns completed: 1/2
   step 1: FAIL (response_contains ✗)
