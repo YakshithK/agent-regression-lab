@@ -30,7 +30,7 @@
     "docs"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=18"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run build:ui",
