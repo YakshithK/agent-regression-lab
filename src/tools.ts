@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
@@ -481,8 +482,7 @@ async function loadTools(): Promise<LoadedTool[]> {
 }
 
 async function loadConfiguredTool(tool: ToolRegistration): Promise<LoadedTool> {
-  const moduleUrl = pathToFileURL(resolve(tool.modulePath!)).href;
-  const module = await import(moduleUrl);
+  const module = tool.package ? await importConfiguredPackageTool(tool) : await importConfiguredFileTool(tool);
   const candidate = module[tool.exportName!];
   if (typeof candidate !== "function") {
     throw new Error(`Tool '${tool.name}' export '${tool.exportName}' is not a function.`);
@@ -496,6 +496,23 @@ async function loadConfiguredTool(tool: ToolRegistration): Promise<LoadedTool> {
     },
     handler: candidate as ToolHandler,
   };
+}
+
+async function importConfiguredFileTool(tool: ToolRegistration): Promise<Record<string, unknown>> {
+  const moduleUrl = pathToFileURL(resolve(tool.modulePath!)).href;
+  return (await import(moduleUrl)) as Record<string, unknown>;
+}
+
+async function importConfiguredPackageTool(tool: ToolRegistration): Promise<Record<string, unknown>> {
+  try {
+    const requireFromCwd = createRequire(resolve(process.cwd(), "package.json"));
+    const resolved = requireFromCwd.resolve(tool.package!);
+    const moduleUrl = pathToFileURL(resolved).href;
+    return (await import(moduleUrl)) as Record<string, unknown>;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Tool '${tool.name}' failed to load package '${tool.package}': ${message}`);
+  }
 }
 
 function assertObject(value: unknown): asserts value is Record<string, unknown> {

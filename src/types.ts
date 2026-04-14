@@ -71,6 +71,7 @@ export type ToolSpec = {
 
 export type ToolRegistration = ToolSpec & {
   modulePath?: string;
+  package?: string;
   exportName?: string;
 };
 

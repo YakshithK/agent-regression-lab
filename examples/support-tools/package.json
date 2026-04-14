@@ -1,0 +1,8 @@
+{
+  "name": "@agentlab/example-support-tools",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  }
+}

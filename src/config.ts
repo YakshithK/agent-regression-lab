@@ -117,8 +117,11 @@ function validateToolRegistration(value: unknown): asserts value is ToolRegistra
     throw new Error("Each tool registration must define a non-empty 'name'.");
   }
 
-  if (typeof value.modulePath !== "string" || value.modulePath.length === 0) {
-    throw new Error(`Tool '${value.name}' must define a non-empty 'modulePath'.`);
+  const hasModulePath = typeof value.modulePath === "string" && value.modulePath.length > 0;
+  const hasPackage = typeof value.package === "string" && value.package.length > 0;
+
+  if ((hasModulePath ? 1 : 0) + (hasPackage ? 1 : 0) !== 1) {
+    throw new Error(`Tool '${value.name}' must define exactly one of 'modulePath' or 'package'.`);
   }
 
   if (typeof value.exportName !== "string" || value.exportName.length === 0) {
@@ -133,13 +136,15 @@ function validateToolRegistration(value: unknown): asserts value is ToolRegistra
     throw new Error(`Tool '${value.name}' must define an object 'inputSchema'.`);
   }
 
-  const resolved = resolve(value.modulePath);
-  const root = `${process.cwd()}${sep}`;
-  if (!(resolved === process.cwd() || resolved.startsWith(root))) {
-    throw new Error(`Tool '${value.name}' modulePath must stay within the repo.`);
-  }
-  if (!exists(resolved)) {
-    throw new Error(`Tool '${value.name}' references missing module '${relative(process.cwd(), resolved)}'.`);
+  if (hasModulePath) {
+    const resolved = resolve(value.modulePath!);
+    const root = `${process.cwd()}${sep}`;
+    if (!(resolved === process.cwd() || resolved.startsWith(root))) {
+      throw new Error(`Tool '${value.name}' modulePath must stay within the repo.`);
+    }
+    if (!exists(resolved)) {
+      throw new Error(`Tool '${value.name}' references missing module '${relative(process.cwd(), resolved)}'.`);
+    }
   }
 }
 

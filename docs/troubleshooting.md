@@ -138,13 +138,68 @@ Typical reasons:
 - `agentlab.config.yaml` is missing
 - the configured `name` does not match the CLI `--agent` value
 - `modulePath` points outside the repo
+- both `modulePath` and `package` were provided for the same tool
+- the configured npm package is not installed
 - the configured export or command does not exist
 
 Working references in this repo:
 
 - tool config: `agentlab.config.yaml`
 - custom tool: `user_tools/findDuplicateCharge.ts`
+- package-style tools: `examples/support-tools`, `examples/coding-tools`
 - external agents: `custom_agents/node_agent.mjs`, `custom_agents/python_agent.py`
+
+### `Tool '<name>' must define exactly one of 'modulePath' or 'package'`
+
+Your tool registration is ambiguous or incomplete.
+
+Valid:
+
+```yaml
+tools:
+  - name: support.find_duplicate_charge
+    modulePath: ./user_tools/findDuplicateCharge.ts
+    exportName: findDuplicateCharge
+```
+
+Also valid:
+
+```yaml
+tools:
+  - name: support.find_duplicate_charge
+    package: "@agentlab/example-support-tools"
+    exportName: findDuplicateCharge
+```
+
+Invalid:
+
+- setting both `modulePath` and `package`
+- setting neither of them
+
+### `Tool '<name>' failed to load package '<pkg>'`
+
+The package-backed tool could not be resolved from the current project.
+
+Check:
+
+- the package is installed in the current project
+- the package name is correct
+- the package exports the named function you configured
+
+Typical fix:
+
+```bash
+npm install @agentlab/example-support-tools
+```
+
+### `Tool '<name>' export '<export>' is not a function`
+
+The module loaded successfully, but the named export does not exist or is not callable.
+
+Check:
+
+- `exportName` matches the actual exported function name
+- the package or local module uses ESM exports as expected
 
 ---
 

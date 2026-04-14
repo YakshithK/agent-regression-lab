@@ -55,6 +55,26 @@ describe("init command", () => {
 
     const content = readFileSync(configPath, "utf-8");
     assert.ok(content.includes("mock-default"));
+    assert.ok(content.includes('modulePath: ./tools/customTool.ts'));
+    assert.ok(content.includes('package: "@agentlab/example-support-tools"'));
+  });
+
+  it("prints next steps including package-backed tool guidance", async () => {
+    const lines: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map((arg) => String(arg)).join(" "));
+    };
+
+    try {
+      await initProject("my-project");
+    } finally {
+      console.log = originalLog;
+    }
+
+    const output = lines.join("\n");
+    assert.match(output, /npm install @agentlab\/example-support-tools/);
+    assert.match(output, /agentlab run sample\.hello-world --agent mock-default/);
   });
 
   it("throws if directory already exists", async () => {

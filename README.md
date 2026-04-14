@@ -29,7 +29,7 @@ This is a local-first alpha for early technical teams. It is strongest when used
 ## What It Supports Today
 
 - YAML scenarios under `scenarios/`
-- deterministic built-in tools plus repo-local custom tools from `agentlab.config.yaml`
+- deterministic built-in tools plus custom tools from `agentlab.config.yaml`
 - named agents from `agentlab.config.yaml`
 - built-in `mock`, `openai`, `external_process`, and `http` agent modes
 - `type: conversation` multi-turn dialog scenarios for HTTP agents
@@ -180,7 +180,7 @@ Use this as the default mental model:
 3. note the run id or suite batch id
 4. inspect the run in CLI or UI
 5. compare two runs or two suite batches
-6. extend the setup with a named agent or repo-local tool when needed
+6. extend the setup with a named agent or custom tools from repo-local files or installed packages when needed
 
 ## Canonical Live HTTP Fixture
 
@@ -202,7 +202,7 @@ The `arl-test` scenarios are intended to behave like a real internal-team regres
 `agentlab.config.yaml` is the public extension point for:
 
 - named agents
-- repo-local custom tools
+- custom tools from repo-local files or installed npm packages
 
 Supported agent providers:
 
@@ -215,6 +215,7 @@ Working sample assets already live in this repo:
 
 - external agents: `custom_agents/node_agent.mjs`, `custom_agents/python_agent.py`
 - custom tool: `user_tools/findDuplicateCharge.ts`
+- package-style tool examples: `examples/support-tools`, `examples/coding-tools`
 - sample config: `agentlab.config.yaml`
 
 See:

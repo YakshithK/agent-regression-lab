@@ -27,7 +27,8 @@
     "dist",
     "dist/ui-assets",
     "README.md",
-    "docs"
+    "docs",
+    "examples"
   ],
   "engines": {
     "node": ">=18"

@@ -48,11 +48,24 @@ agents:
   #   model: gpt-4o-mini
   #   label: openai-test
 
-# Custom tools can be registered here (must be repo-local paths)
+# Tools can be registered from either:
+# 1. repo-local files
+# 2. installed npm packages
+#
 # tools:
-#   - name: my.custom_tool
+#   - name: my.local_tool
 #     modulePath: ./tools/customTool.ts
 #     exportName: customTool
+#     description: My repo-local custom tool.
+#     inputSchema:
+#       type: object
+#
+#   - name: support.find_duplicate_charge
+#     package: "@agentlab/example-support-tools"
+#     exportName: findDuplicateCharge
+#     description: Find the duplicated charge order id for a given customer.
+#     inputSchema:
+#       type: object
 `;
 
 export async function initProject(projectName: string): Promise<void> {
@@ -77,5 +90,7 @@ export async function initProject(projectName: string): Promise<void> {
   console.log("");
   console.log("Next steps:");
   console.log(`  cd ${projectName}`);
+  console.log("  npm install @agentlab/example-support-tools");
+  console.log("  # then register package-backed tools in agentlab.config.yaml if needed");
   console.log("  agentlab run sample.hello-world --agent mock-default");
 }

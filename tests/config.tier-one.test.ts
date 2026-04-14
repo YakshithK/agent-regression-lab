@@ -130,3 +130,60 @@ runtime_profiles:
     /invalid tool fault mode/i,
   );
 });
+
+test("config accepts a package-backed tool registration", () => {
+  const packageToolConfig = `
+tools:
+  - name: support.find_duplicate_charge
+    package: "@agentlab/example-support-tools"
+    exportName: findDuplicateCharge
+    description: Find the duplicated charge order id for a given customer.
+    inputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        customer_id:
+          type: string
+      required:
+        - customer_id
+`;
+
+  withTempConfig(packageToolConfig, () => {
+    const config = loadAgentLabConfig();
+    assert.strictEqual(config.tools?.[0]?.package, "@agentlab/example-support-tools");
+  });
+});
+
+test("config rejects a tool with both modulePath and package", () => {
+  const invalidConfig = `
+tools:
+  - name: support.find_duplicate_charge
+    modulePath: ./user_tools/findDuplicateCharge.ts
+    package: "@agentlab/example-support-tools"
+    exportName: findDuplicateCharge
+    description: Find the duplicated charge order id for a given customer.
+    inputSchema:
+      type: object
+`;
+
+  assert.throws(
+    () => withTempConfig(invalidConfig, () => loadAgentLabConfig()),
+    /exactly one of 'modulePath' or 'package'/i,
+  );
+});
+
+test("config rejects a tool with neither modulePath nor package", () => {
+  const invalidConfig = `
+tools:
+  - name: support.find_duplicate_charge
+    exportName: findDuplicateCharge
+    description: Find the duplicated charge order id for a given customer.
+    inputSchema:
+      type: object
+`;
+
+  assert.throws(
+    () => withTempConfig(invalidConfig, () => loadAgentLabConfig()),
+    /exactly one of 'modulePath' or 'package'/i,
+  );
+});

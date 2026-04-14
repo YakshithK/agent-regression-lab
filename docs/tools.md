@@ -1,6 +1,6 @@
 # Custom Tools
 
-Custom tools are registered in `agentlab.config.yaml` and loaded from repo-local JS or TS modules.
+Custom tools are registered in `agentlab.config.yaml` and can be loaded from repo-local JS/TS modules or installed npm packages.
 
 This is the main extension point when built-in tools are not enough.
 
@@ -9,17 +9,38 @@ This is the main extension point when built-in tools are not enough.
 Each tool entry must define:
 
 - `name`
-- `modulePath`
+- exactly one source:
+  - `modulePath`, or
+  - `package`
 - `exportName`
 - `description`
 - `inputSchema`
 
-Example:
+Repo-local example:
 
 ```yaml
 tools:
   - name: support.find_duplicate_charge
     modulePath: user_tools/findDuplicateCharge.ts
+    exportName: findDuplicateCharge
+    description: Find the duplicated charge order id for a given customer.
+    inputSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        customer_id:
+          type: string
+          description: Customer id to inspect for duplicated charges.
+      required:
+        - customer_id
+```
+
+Installed package example:
+
+```yaml
+tools:
+  - name: support.find_duplicate_charge
+    package: "@agentlab/example-support-tools"
     exportName: findDuplicateCharge
     description: Find the duplicated charge order id for a given customer.
     inputSchema:
@@ -48,11 +69,15 @@ export async function myTool(input: unknown): Promise<{ ok: boolean }> {
 The existing working example is:
 
 - `user_tools/findDuplicateCharge.ts`
+- `examples/support-tools`
+- `examples/coding-tools`
 
 ## Important Constraints
 
+- each tool must define exactly one of `modulePath` or `package`
 - `modulePath` must stay within the repo
 - the module must exist at load time
+- installed packages must be resolvable from the current project
 - the named export must exist
 - tool input should be validated defensively inside the tool
 - tool output should be deterministic and JSON-serializable
@@ -100,3 +125,9 @@ Typical config failures:
 - invalid `inputSchema` shape
 
 See [troubleshooting.md](troubleshooting.md) for failure examples and fixes.
+
+For installed-package workflows, a good local path is:
+
+```bash
+npm install @agentlab/example-support-tools
+```
