@@ -5,6 +5,7 @@ import { createAgentFactory } from "./agent/factory.js";
 import { getAgentRegistration, getVariantSet } from "./config.js";
 import { createConfigHash, createSuiteBatchId } from "./lib/id.js";
 import { formatCliErrorMessage, formatRunIdentityLines, getFailedEvaluatorSummaries, getRunErrorDetail } from "./runOutput.js";
+import { initProject } from "./init.js";
 import type { AgentRuntimeConfig, RunBundle, VariantDefinition } from "./types.js";
 
 async function main(): Promise<void> {
@@ -36,6 +37,9 @@ async function main(): Promise<void> {
     case "ui":
       await handleUi();
       break;
+    case "init":
+      await handleInit(args);
+      break;
     default:
       printUsage();
   }
@@ -43,6 +47,7 @@ async function main(): Promise<void> {
 
 function printUsage(): void {
   console.log(`Usage:
+  agentlab init <project-name>
   agentlab list scenarios
   agentlab run <scenario-id> [--agent <name>] [--provider mock|openai|external_process|http] [--model <model>] [--agent-label <label>]
   agentlab run --suite <suite-id> [--agent <name>] [--provider mock|openai|external_process|http] [--model <model>] [--agent-label <label>]
@@ -70,6 +75,16 @@ async function handleList(args: string[]): Promise<void> {
   for (const scenario of listScenarios()) {
     console.log(`${scenario.id}\t${scenario.suite}\t${scenario.difficulty ?? "-"}\t${scenario.description ?? ""}`);
   }
+}
+
+async function handleInit(args: string[]): Promise<void> {
+  const projectName = args[0];
+  if (!projectName) {
+    console.error("Error: project-name is required.");
+    console.error("Usage: agentlab init <project-name>");
+    process.exit(1);
+  }
+  await initProject(projectName);
 }
 
 async function handleRun(args: string[]): Promise<void> {
