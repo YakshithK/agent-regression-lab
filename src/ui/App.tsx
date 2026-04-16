@@ -137,12 +137,24 @@ function RunListPage(): React.JSX.Element {
       .then((data) => setRuns(Array.isArray(data.runs) ? data.runs : []));
   }, [suite, status, provider]);
 
+  const stats = summarizeRuns(runs);
+
   return (
     <section>
       <div className="hero">
         <h1>Runs</h1>
         <p>Inspect local alpha runs, filter failures, and compare behavior changes.</p>
       </div>
+      {runs.length > 0 ? (
+        <div className="stats dashboard-stats">
+          <Stat label="Runs shown" value={stats.total} />
+          <Stat label="Passing" value={<span className="pass-text">{stats.pass}</span>} />
+          <Stat label="Failing" value={<span className="fail-text">{stats.fail}</span>} />
+          <Stat label="Errors" value={<span className="error-text">{stats.error}</span>} />
+          <Stat label="Latest suite" value={stats.latestSuite} />
+          <Stat label="Latest provider" value={stats.latestProvider} />
+        </div>
+      ) : null}
       <div className="filters">
         <input value={suite} onChange={(event) => setSuite(event.target.value)} placeholder="Suite" />
         <select value={status} onChange={(event) => setStatus(event.target.value)}>
@@ -282,11 +294,13 @@ function RunDetailPage(props: { runId: string }): React.JSX.Element {
       </section>
       <section className="panel">
         <h2>Trace</h2>
-        <ol className="timeline">
+        <ol className="timeline timeline-detailed">
           {detail.traceEvents.map((event) => (
-            <li key={event.eventId}>
-              <div>
-                <strong>{event.stepIndex}. {event.type}</strong> <span className="muted">{event.source}</span>
+            <li key={event.eventId} className="timeline-item">
+              <div className="timeline-head">
+                <span className="timeline-step">Step {event.stepIndex}</span>
+                <span className="event-chip">{formatEventLabel(event.type)}</span>
+                <span className="muted">{event.source}</span>
               </div>
               <pre>{JSON.stringify(event.payload, null, 2)}</pre>
             </li>
@@ -304,7 +318,7 @@ export function FailureSummaryPanel(props: { detail: RunDetail }): React.JSX.Ele
   }
 
   return (
-    <section className="panel">
+    <section className="panel failure-panel">
       <h2>Failures First</h2>
       <p><strong>Status:</strong> <span className={`pill ${props.detail.run.status}`}>{props.detail.run.status}</span></p>
       <p><strong>Termination:</strong> {props.detail.run.terminationReason}</p>
@@ -364,13 +378,14 @@ function ComparePage(props: { baseline?: string; candidate?: string }): React.JS
         <h1>Compare</h1>
         <p>{data.baseline.run.scenarioId}</p>
       </div>
+      <ComparisonHero comparison={data} />
       <div className="stats">
         <Stat label="Classification" value={data.classification} />
         <Stat label="Score delta" value={signed(data.deltas.score)} />
         <Stat label="Runtime delta" value={`${signed(data.deltas.runtimeMs)}ms`} />
         <Stat label="Step delta" value={signed(data.deltas.steps)} />
       </div>
-      <section className="panel">
+      <section className="panel emphasis-panel">
         <h2>Notes</h2>
         {data.notes.length === 0 ? <p className="muted">No material differences recorded.</p> : null}
         <ul className="stack">
@@ -383,18 +398,30 @@ function ComparePage(props: { baseline?: string; candidate?: string }): React.JS
         <section className="panel">
           <h2>Evaluator diffs</h2>
           {data.evaluatorDiffs.length === 0 ? <p className="muted">No evaluator changes.</p> : null}
-          <ul className="stack">
+          <ul className="stack diff-list">
             {data.evaluatorDiffs.map((diff) => (
-              <li key={diff.evaluatorId}>{diff.note}{diff.hardGate ? " (hard gate)" : ""}</li>
+              <li key={diff.evaluatorId} className="diff-card">
+                <div className="diff-card-head">
+                  <strong>{diff.evaluatorId}</strong>
+                  {diff.hardGate ? <span className="event-chip">hard gate</span> : null}
+                </div>
+                <div className="muted">{diff.note}</div>
+              </li>
             ))}
           </ul>
         </section>
         <section className="panel">
           <h2>Tool diffs</h2>
           {data.toolDiffs.length === 0 ? <p className="muted">No tool usage changes.</p> : null}
-          <ul className="stack">
+          <ul className="stack diff-list">
             {data.toolDiffs.map((diff) => (
-              <li key={diff.toolName}>{diff.note}</li>
+              <li key={diff.toolName} className="diff-card">
+                <div className="diff-card-head">
+                  <strong>{diff.toolName}</strong>
+                  <span className={`pill ${mapRiskToPill(diff.risk)}`}>{diff.risk}</span>
+                </div>
+                <div className="muted">{diff.note}</div>
+              </li>
             ))}
           </ul>
         </section>
@@ -409,7 +436,7 @@ function ComparePage(props: { baseline?: string; candidate?: string }): React.JS
 
 function RunSide(props: { title: string; detail: RunDetail }): React.JSX.Element {
   return (
-    <section className="panel">
+    <section className={`panel compare-side ${props.title === "Candidate" ? "candidate-side" : "baseline-side"}`}>
       <h2>{props.title}</h2>
       <p><strong>Run:</strong> <a href={`/runs/${props.detail.run.id}`}>{props.detail.run.id}</a></p>
       <p><strong>Status:</strong> <span className={`pill ${props.detail.run.status}`}>{props.detail.run.status}</span></p>
@@ -428,8 +455,8 @@ function RunSide(props: { title: string; detail: RunDetail }): React.JSX.Element
       <h3>Trace</h3>
       <ol className="timeline compact">
         {props.detail.traceEvents.map((event) => (
-          <li key={event.eventId}>
-            <strong>{event.stepIndex}. {event.type}</strong>
+          <li key={event.eventId} className="timeline-item compact-item">
+            <strong>{event.stepIndex}. {formatEventLabel(event.type)}</strong>
           </li>
         ))}
       </ol>
@@ -467,6 +494,7 @@ function SuiteComparePage(props: { baselineBatch?: string; candidateBatch?: stri
         <h1>Suite Compare</h1>
         <p>{data.suite}</p>
       </div>
+      <SuiteComparisonHero data={data} />
       <div className="stats">
         <Stat label="Classification" value={data.classification} />
         <Stat label="Pass delta" value={signed(data.deltas.pass)} />
@@ -502,10 +530,12 @@ function ScenarioList(props: { title: string; items: Array<{ scenarioId: string;
     <section className="panel">
       <h2>{props.title}</h2>
       {props.items.length === 0 ? <p className="muted">None.</p> : null}
-      <ul className="stack">
+      <ul className="stack diff-list">
         {props.items.map((item) => (
-          <li key={item.scenarioId}>
-            <strong>{item.scenarioId}</strong> <span className="muted">{item.comparison.classification}</span>
+          <li key={item.scenarioId} className="diff-card">
+            <div className="diff-card-head">
+              <strong>{item.scenarioId}</strong> <span className="muted">{item.comparison.classification}</span>
+            </div>
             <div>
               <a href={`/compare?baseline=${item.comparison.baseline.run.id}&candidate=${item.comparison.candidate.run.id}`}>open run compare</a>
             </div>
@@ -534,6 +564,38 @@ function EmptyState(props: { title: string; description: string }): React.JSX.El
   );
 }
 
+export function ComparisonHero(props: { comparison: ComparePayload }): React.JSX.Element {
+  const tone = mapClassificationToTone(props.comparison.classification);
+  return (
+    <section className={`panel compare-hero ${tone}`}>
+      <div className="compare-hero-head">
+        <h2>{props.comparison.classification}</h2>
+        <span className={`pill ${tone}`}>{props.comparison.verdictDelta}</span>
+      </div>
+      <p className="muted">
+        Output changed: {props.comparison.outputChanged ? "yes" : "no"}
+        {props.comparison.terminationDelta ? ` • termination: ${props.comparison.terminationDelta}` : ""}
+      </p>
+    </section>
+  );
+}
+
+export function SuiteComparisonHero(props: { data: SuiteComparisonPayload }): React.JSX.Element {
+  return (
+    <section className="panel compare-hero neutral">
+      <div className="compare-hero-head">
+        <h2>Suite movement</h2>
+        <span className="event-chip">{props.data.classification}</span>
+      </div>
+      <div className="stats compact-stats">
+        <Stat label="Regressions" value={props.data.regressions.length} />
+        <Stat label="Improvements" value={props.data.improvements.length} />
+        <Stat label="Unchanged" value={props.data.unchanged.length} />
+      </div>
+    </section>
+  );
+}
+
 export function getFailureSummaryItems(detail: RunDetail): string[] {
   const items: string[] = [];
   if (detail.errorDetail) {
@@ -551,6 +613,51 @@ export function getFailureSummaryItems(detail: RunDetail): string[] {
   }
 
   return items;
+}
+
+export function summarizeRuns(runs: RunListItem[]): {
+  total: number;
+  pass: number;
+  fail: number;
+  error: number;
+  latestSuite: string;
+  latestProvider: string;
+} {
+  return {
+    total: runs.length,
+    pass: runs.filter((run) => run.status === "pass").length,
+    fail: runs.filter((run) => run.status === "fail").length,
+    error: runs.filter((run) => run.status === "error").length,
+    latestSuite: runs[0]?.suite ?? "-",
+    latestProvider: runs[0]?.provider ?? "-",
+  };
+}
+
+function formatEventLabel(type: string): string {
+  return type.replaceAll("_", " ");
+}
+
+function mapRiskToPill(risk: string): "pass" | "fail" | "error" {
+  if (risk === "high") {
+    return "fail";
+  }
+  if (risk === "medium") {
+    return "error";
+  }
+  return "pass";
+}
+
+function mapClassificationToTone(classification: string): "pass" | "fail" | "error" | "neutral" {
+  if (classification.includes("regress")) {
+    return "fail";
+  }
+  if (classification.includes("improv")) {
+    return "pass";
+  }
+  if (classification.includes("changed")) {
+    return "error";
+  }
+  return "neutral";
 }
 
 function signed(value: number): string {

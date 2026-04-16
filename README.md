@@ -46,6 +46,26 @@ Use this as the default product story:
 3. run curated golden suites before release
 4. keep incident-derived scenarios as permanent regression assets
 
+## Start Here
+
+If your agent runs as an HTTP service:
+
+- use `provider: http`
+- start with [arl-test](arl-test)
+- read [docs/agents.md](docs/agents.md) and [docs/scenarios.md](docs/scenarios.md)
+
+If you are validating coding-agent changes:
+
+- start with the coding scenarios under `scenarios/coding/`
+- read [docs/coding-agents.md](docs/coding-agents.md)
+- use deterministic tool-loop runs first, then compare before/after behavior
+
+If you want pre-merge regression checks in CI:
+
+- use `suite_definitions`
+- start with `.github/workflows/agentlab-pre-merge.yml`
+- run `agentlab run --suite-def pre_merge --agent mock-default`
+
 ## First 10 Minutes
 
 The fastest path is to run the CLI from a local checkout.
@@ -252,7 +272,7 @@ Agent behavior can still vary depending on the provider path. The built-in `mock
 ## Limitations
 
 - this is a local-first alpha, not a hosted platform
-- custom tool loading is limited to repo-local module paths
+- the published package/example ecosystem is still small
 - external agents integrate through the local stdin/stdout protocol only
 - the UI is intentionally minimal and optimized for debugging
 - SQLite-backed local storage still makes sequential live verification the safest path when reusing the same local artifacts DB

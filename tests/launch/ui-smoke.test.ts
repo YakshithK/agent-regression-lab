@@ -4,7 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { getFailedEvaluatorSummaries } from "../../src/runOutput.js";
-import { FailureSummaryPanel, RunIdentitySummary } from "../../src/ui/App.js";
+import { ComparisonHero, FailureSummaryPanel, RunIdentitySummary, SuiteComparisonHero, summarizeRuns } from "../../src/ui/App.js";
 import type { RunBundle } from "../../src/types.js";
 
 test("CLI failure summaries list failing evaluators explicitly", () => {
@@ -120,4 +120,138 @@ test("run detail UI shows variant and runtime identity metadata", () => {
   assert.match(markup, /timeout-orders-tool/);
   assert.match(markup, /Suite definition:/);
   assert.match(markup, /pre_merge/);
+});
+
+test("runs dashboard summary counts pass fail and error states", () => {
+  const summary = summarizeRuns([
+    {
+      id: "run_1",
+      scenarioId: "support.refund-correct-order",
+      suite: "support",
+      agentVersionId: "agent_1",
+      provider: "mock",
+      status: "pass",
+      score: 100,
+      durationMs: 10,
+      totalSteps: 3,
+      startedAt: "2026-04-09T00:00:00.000Z",
+    },
+    {
+      id: "run_2",
+      scenarioId: "support.refund-correct-order",
+      suite: "support",
+      agentVersionId: "agent_1",
+      provider: "http",
+      status: "fail",
+      score: 0,
+      durationMs: 20,
+      totalSteps: 2,
+      startedAt: "2026-04-09T00:01:00.000Z",
+    },
+    {
+      id: "run_3",
+      scenarioId: "ops.payments-api-alert",
+      suite: "ops",
+      agentVersionId: "agent_2",
+      provider: "external_process",
+      status: "error",
+      score: 0,
+      durationMs: 30,
+      totalSteps: 1,
+      startedAt: "2026-04-09T00:02:00.000Z",
+    },
+  ]);
+
+  assert.deepEqual(summary, {
+    total: 3,
+    pass: 1,
+    fail: 1,
+    error: 1,
+    latestSuite: "support",
+    latestProvider: "mock",
+  });
+});
+
+test("compare hero surfaces classification and verdict delta", () => {
+  const markup = renderToStaticMarkup(
+    React.createElement(ComparisonHero, {
+      comparison: {
+        classification: "regressed",
+        verdictDelta: "pass -> fail",
+        outputChanged: true,
+        deltas: { score: -100, runtimeMs: 25, steps: 2, runtimePct: 50 },
+        notes: [],
+        evaluatorDiffs: [],
+        toolDiffs: [],
+        baseline: {
+          run: {
+            id: "run_a",
+            scenarioId: "support.refund-correct-order",
+            status: "pass",
+            score: 100,
+            durationMs: 10,
+            totalSteps: 3,
+            terminationReason: "completed",
+            finalOutput: "ok",
+            startedAt: "2026-04-09T00:00:00.000Z",
+          },
+          evaluatorResults: [],
+          toolCalls: [],
+          traceEvents: [],
+        },
+        candidate: {
+          run: {
+            id: "run_b",
+            scenarioId: "support.refund-correct-order",
+            status: "fail",
+            score: 0,
+            durationMs: 35,
+            totalSteps: 5,
+            terminationReason: "evaluator_failed",
+            finalOutput: "bad",
+            startedAt: "2026-04-09T00:01:00.000Z",
+          },
+          evaluatorResults: [],
+          toolCalls: [],
+          traceEvents: [],
+        },
+      },
+    }),
+  );
+
+  assert.match(markup, /regressed/);
+  assert.match(markup, /pass -&gt; fail/);
+  assert.match(markup, /Output changed: yes/);
+});
+
+test("suite comparison hero highlights regression and improvement counts", () => {
+  const markup = renderToStaticMarkup(
+    React.createElement(SuiteComparisonHero, {
+      data: {
+        suite: "support",
+        baselineBatchId: "suite_a",
+        candidateBatchId: "suite_b",
+        classification: "regressed",
+        notes: [],
+        deltas: {
+          pass: -1,
+          fail: 1,
+          error: 0,
+          averageScore: -20,
+          averageRuntimeMs: 15,
+          averageSteps: 1,
+        },
+        regressions: [{ scenarioId: "support.refund-correct-order", comparison: {} as any }],
+        improvements: [{ scenarioId: "support.cancel-subscription", comparison: {} as any }],
+        unchanged: [],
+        missingFromCandidate: [],
+        missingFromBaseline: [],
+      },
+    }),
+  );
+
+  assert.match(markup, /Suite movement/);
+  assert.match(markup, /Regressions/);
+  assert.match(markup, />1</);
+  assert.match(markup, /Improvements/);
 });

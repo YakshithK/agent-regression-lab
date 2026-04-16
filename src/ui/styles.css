@@ -9,6 +9,7 @@
   --pass: #1e6a42;
   --fail: #9a2c1f;
   --error: #5b1e72;
+  --shadow: 0 16px 40px rgba(76, 58, 26, 0.08);
 }
 
 * {
@@ -111,6 +112,7 @@ select {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 1rem;
+  box-shadow: var(--shadow);
 }
 
 .stat-value {
@@ -122,6 +124,22 @@ select {
 .compare-grid {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   margin-bottom: 1rem;
+}
+
+.dashboard-stats .stat {
+  border-top: 4px solid var(--line);
+}
+
+.pass-text {
+  color: var(--pass);
+}
+
+.fail-text {
+  color: var(--fail);
+}
+
+.error-text {
+  color: var(--error);
 }
 
 .table {
@@ -174,6 +192,19 @@ select {
   color: var(--error);
 }
 
+.pill.neutral {
+  background: rgba(102, 95, 84, 0.14);
+  color: var(--muted);
+}
+
+.failure-panel {
+  border-left: 6px solid var(--fail);
+}
+
+.emphasis-panel {
+  border-left: 6px solid var(--accent);
+}
+
 .stack,
 .timeline {
   display: grid;
@@ -183,6 +214,89 @@ select {
 
 .timeline.compact {
   gap: 0.35rem;
+}
+
+.timeline-detailed {
+  padding-left: 0;
+  list-style: none;
+}
+
+.timeline-item {
+  border-left: 3px solid var(--line);
+  padding-left: 0.9rem;
+  margin-left: 0.35rem;
+}
+
+.timeline-head,
+.diff-card-head,
+.compare-hero-head {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.timeline-step,
+.event-chip {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: #efe5d5;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-family: "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.diff-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.diff-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.8rem;
+  background: #faf5ec;
+}
+
+.compare-hero {
+  margin-bottom: 1rem;
+}
+
+.compare-hero.pass {
+  border-left: 6px solid var(--pass);
+}
+
+.compare-hero.fail {
+  border-left: 6px solid var(--fail);
+}
+
+.compare-hero.error {
+  border-left: 6px solid var(--error);
+}
+
+.compare-hero.neutral {
+  border-left: 6px solid var(--muted);
+}
+
+.compact-stats {
+  margin-top: 1rem;
+  margin-bottom: 0;
+}
+
+.compare-side.baseline-side {
+  border-top: 4px solid #b89d67;
+}
+
+.compare-side.candidate-side {
+  border-top: 4px solid var(--accent);
+}
+
+.compact-item {
+  border-left: none;
+  padding-left: 0;
+  margin-left: 0;
 }
 
 @media (max-width: 720px) {
