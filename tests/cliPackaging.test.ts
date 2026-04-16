@@ -16,6 +16,14 @@ test("cli entrypoint has a node shebang", () => {
   assert.match(source.split("\n")[0] ?? "", /^#!\/usr\/bin\/env node$/);
 });
 
+test("package manifest exposes a checked-in bin wrapper", () => {
+  assert.deepStrictEqual(packageJson.bin, { agentlab: "bin/agentlab.js" });
+
+  const wrapperSource = readFileSync(resolve("bin/agentlab.js"), "utf8");
+  assert.match(wrapperSource.split("\n")[0] ?? "", /^#!\/usr\/bin\/env node$/);
+  assert.match(wrapperSource, /import "\.\.\/dist\/index\.js";/);
+});
+
 test("built cli responds to help and version", async (t) => {
   const cliPath = resolve("dist/index.js");
   const fixtureRoot = createCliFixtureWorkspace();
