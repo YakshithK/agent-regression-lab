@@ -8,7 +8,7 @@ import { formatCliErrorMessage, formatRunIdentityLines, getFailedEvaluatorSummar
 import { initProject } from "./init.js";
 import type { AgentRuntimeConfig, RunBundle, VariantDefinition } from "./types.js";
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
 
   switch (command) {

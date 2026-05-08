@@ -4,5 +4,10 @@ artifacts/
 dist/
 *.db
 .codex
+.superpowers/
 superpowers/
 .worktrees/
+*.mp4
+*.Identifier
+TODOS.node_modules
+.gstack/*
