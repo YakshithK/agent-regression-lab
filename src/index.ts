@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import packageJson from "../package.json" with { type: "json" };
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
+import { basename } from "node:path";
 import { createAgentFactory } from "./agent/factory.js";
 import { getAgentRegistration, getVariantSet } from "./config.js";
 import { createConfigHash, createSuiteBatchId } from "./lib/id.js";
@@ -956,5 +958,5 @@ function isEntrypoint(): boolean {
   if (!entry) {
     return false;
   }
-  return import.meta.url === pathToFileURL(entry).href;
+  return basename(entry) === "agentlab" || realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
 }

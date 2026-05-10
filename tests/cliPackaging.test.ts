@@ -1,6 +1,6 @@
 import assert from "node:assert";
 import { execFile } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -54,6 +54,18 @@ test("built cli responds to help and version", async (t) => {
   const variantRun = await runCli(cliPath, fixtureRoot, "run", "support.refund-correct-order", "--variant-set", "refund-agent-model-comparison");
   assert.match(variantRun.stdout, /Variant set: refund-agent-model-comparison/);
   assert.match(variantRun.stdout, /Variant: baseline/);
+});
+
+test("built cli runs when invoked through a symlinked bin", async (t) => {
+  const cliPath = resolve("dist/index.js");
+  const fixtureRoot = createCliFixtureWorkspace();
+  const linkedBin = join(fixtureRoot, "agentlab");
+  symlinkSync(cliPath, linkedBin);
+  chmodSync(cliPath, 0o755);
+  t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  const help = await runCli(linkedBin, fixtureRoot, "--help");
+  assert.match(help.stdout, /agentlab run --demo/);
 });
 
 function createCliFixtureWorkspace(): string {
