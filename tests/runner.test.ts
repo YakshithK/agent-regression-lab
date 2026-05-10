@@ -99,6 +99,24 @@ test("runner records runtime_profile_applied when no profile is configured", asy
   assert.equal(bundle.run.totalSteps, 8);
 });
 
+test("runner stores scenario normalize rules on the run record", async () => {
+  const bundle = await runScenario({
+    agentAdapter: noopAdapter,
+    agentVersion,
+    scenario: {
+      ...baseScenario,
+      normalize: ["strip_whitespace", "ignore_dates"],
+    },
+    scenarioFileHash: "hash_1",
+    toolSpecs,
+    tools: {
+      "support.wait": async () => ({ ok: true }),
+    },
+  });
+
+  assert.deepEqual(bundle.run.normalizeConfig, ["strip_whitespace", "ignore_dates"]);
+});
+
 test("runner fails on forbidden tool attempts", async () => {
   const bundle = await runScenario({
     agentAdapter: {

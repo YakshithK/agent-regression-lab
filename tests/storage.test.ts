@@ -1,4 +1,9 @@
 import assert from "node:assert";
+import { DatabaseSync } from "node:sqlite";
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chdir, cwd } from "node:process";
 import test from "node:test";
 
 import { Storage } from "../src/storage.js";
@@ -76,6 +81,135 @@ test("compareRuns includes evaluator and tool diffs", () => {
   assert.ok(comparison.toolDiffs.some((diff) => diff.toolName === "orders.refund"));
   } finally {
     storage.close();
+  }
+});
+
+test("saveRun stores normalize config and compareRuns uses stored normalization", () => {
+  const storage = new Storage();
+  try {
+    storage.upsertAgentVersion(agentVersion);
+
+    const baseline = makeBundle(`run_normalize_base_${Date.now()}`, {
+      finalOutput: "Refunded on May 10 2026",
+      normalizeConfig: ["ignore_dates"],
+    });
+    const candidate = makeBundle(`run_normalize_candidate_${Date.now()}`, {
+      finalOutput: "Refunded on 2026-05-11",
+      normalizeConfig: ["ignore_dates"],
+    });
+
+    storage.saveRun(baseline);
+    storage.saveRun(candidate);
+
+    const loaded = storage.getRun(baseline.run.id);
+    assert.deepEqual(loaded?.run.normalizeConfig, ["ignore_dates"]);
+
+    const comparison = storage.compareRuns(baseline.run.id, candidate.run.id);
+    assert.equal(comparison.outputChanged, false);
+    assert.ok(!comparison.notes.includes("Final output changed."));
+  } finally {
+    storage.close();
+  }
+});
+
+test("approveRun marks one baseline per scenario and agent version", () => {
+  const storage = new Storage();
+  try {
+    storage.upsertAgentVersion(agentVersion);
+
+    const first = makeBundle(`run_approve_first_${Date.now()}`);
+    const second = makeBundle(`run_approve_second_${Date.now()}`);
+    storage.saveRun(first);
+    storage.saveRun(second);
+
+    assert.equal(storage.approveRun(first.run.id).status, "approved");
+    assert.equal(storage.approveRun(first.run.id).status, "already_baseline");
+    assert.equal(storage.getBaselineRun(first.run.scenarioId, first.run.agentVersionId)?.run.id, first.run.id);
+
+    assert.equal(storage.approveRun(second.run.id).status, "approved");
+    assert.equal(storage.getBaselineRun(second.run.scenarioId, second.run.agentVersionId)?.run.id, second.run.id);
+  } finally {
+    storage.close();
+  }
+});
+
+test("approveRun returns not_found for unknown run id", () => {
+  const storage = new Storage();
+  try {
+    assert.equal(storage.approveRun(`run_missing_${Date.now()}`).status, "not_found");
+  } finally {
+    storage.close();
+  }
+});
+
+test("Storage migrates v2 databases to v3 without losing existing runs", () => {
+  const previousCwd = cwd();
+  const root = join(tmpdir(), `arl_storage_migration_${Date.now()}`);
+  mkdirSync(join(root, "artifacts"), { recursive: true });
+  chdir(root);
+
+  const db = new DatabaseSync(join(root, "artifacts", "agentlab.db"));
+  try {
+    db.exec(`
+      CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO metadata (key, value) VALUES ('schema_version', '2');
+
+      CREATE TABLE runs (
+        id TEXT PRIMARY KEY,
+        scenario_id TEXT NOT NULL,
+        scenario_file_hash TEXT NOT NULL,
+        agent_version_id TEXT NOT NULL,
+        suite_batch_id TEXT,
+        variant_set_name TEXT,
+        variant_label TEXT,
+        prompt_version TEXT,
+        model_version TEXT,
+        tool_schema_version TEXT,
+        config_label TEXT,
+        config_hash TEXT,
+        runtime_profile_name TEXT,
+        suite_definition_name TEXT,
+        status TEXT NOT NULL,
+        termination_reason TEXT NOT NULL,
+        final_output TEXT NOT NULL,
+        total_steps INTEGER NOT NULL,
+        total_tool_calls INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        total_tokens INTEGER,
+        total_cost_usd REAL,
+        score INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT NOT NULL
+      );
+      INSERT INTO runs (
+        id, scenario_id, scenario_file_hash, agent_version_id, status, termination_reason, final_output,
+        total_steps, total_tool_calls, duration_ms, score, started_at, finished_at
+      ) VALUES (
+        'run_v2_existing', 'support.refund-correct-order', 'hash_same', 'agent_v2',
+        'pass', 'completed', 'Refunded ord_1024', 1, 0, 10, 100, '2026-05-10T00:00:00.000Z', '2026-05-10T00:00:01.000Z'
+      );
+    `);
+  } finally {
+    db.close();
+  }
+
+  try {
+    const storage = new Storage();
+    try {
+      const metadata = (storage as any).db.prepare("SELECT value FROM metadata WHERE key = 'schema_version'").get() as { value: string };
+      const columns = (storage as any).db.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>;
+      const columnNames = new Set(columns.map((column) => column.name));
+
+      assert.equal(metadata.value, "3");
+      assert.equal(columnNames.has("is_baseline"), true);
+      assert.equal(columnNames.has("normalize_config_json"), true);
+      assert.equal(storage.getRun("run_v2_existing")?.run.finalOutput, "Refunded ord_1024");
+    } finally {
+      storage.close();
+    }
+  } finally {
+    chdir(previousCwd);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { ensureParentDir } from "./lib/fs.js";
+import { normalizeOutput } from "./normalize.js";
 import type {
   AgentVersion,
   ConversationScenarioDefinition,
@@ -17,15 +18,15 @@ import type {
   SuiteScenarioComparison,
 } from "./types.js";
 
-const DB_PATH = resolve("artifacts", "agentlab.db");
-const SCHEMA_VERSION = "2";
+const SCHEMA_VERSION = "3";
 
 export class Storage {
   private readonly db: DatabaseSync;
 
   constructor() {
-    ensureParentDir(DB_PATH);
-    this.db = new DatabaseSync(DB_PATH);
+    const dbPath = resolve("artifacts", "agentlab.db");
+    ensureParentDir(dbPath);
+    this.db = new DatabaseSync(dbPath);
     this.db.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;
@@ -93,6 +94,8 @@ export class Storage {
         total_tokens INTEGER,
         total_cost_usd REAL,
         score INTEGER NOT NULL,
+        is_baseline INTEGER NOT NULL DEFAULT 0,
+        normalize_config_json TEXT,
         started_at TEXT NOT NULL,
         finished_at TEXT NOT NULL
       );
@@ -229,8 +232,8 @@ export class Storage {
           id, scenario_id, scenario_file_hash, agent_version_id, status, termination_reason, final_output,
           suite_batch_id, variant_set_name, variant_label, prompt_version, model_version, tool_schema_version,
           config_label, config_hash, runtime_profile_name, suite_definition_name,
-          total_steps, total_tool_calls, duration_ms, total_tokens, total_cost_usd, score, started_at, finished_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          total_steps, total_tool_calls, duration_ms, total_tokens, total_cost_usd, score, normalize_config_json, started_at, finished_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         run.id,
@@ -256,6 +259,7 @@ export class Storage {
         run.totalTokens ?? null,
         run.totalCostUsd ?? null,
         run.score,
+        run.normalizeConfig ? JSON.stringify(run.normalizeConfig) : null,
         run.startedAt,
         run.finishedAt,
       );
@@ -491,6 +495,46 @@ export class Storage {
     return compareRunBundles(baseline, candidate);
   }
 
+  approveRun(runId: string): { status: "approved" | "already_baseline"; run: RunRecord } | { status: "not_found" } {
+    const run = this.getRunRecord(runId);
+    if (!run) {
+      return { status: "not_found" };
+    }
+
+    const existing = this.db
+      .prepare(`SELECT is_baseline FROM runs WHERE id = ?`)
+      .get(runId) as { is_baseline: number } | undefined;
+    if (existing?.is_baseline === 1) {
+      return { status: "already_baseline", run };
+    }
+
+    this.db.exec("BEGIN");
+    try {
+      this.db
+        .prepare(`UPDATE runs SET is_baseline = 0 WHERE scenario_id = ? AND agent_version_id = ?`)
+        .run(run.scenarioId, run.agentVersionId);
+      this.db.prepare(`UPDATE runs SET is_baseline = 1 WHERE id = ?`).run(runId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+
+    return { status: "approved", run };
+  }
+
+  getBaselineRun(scenarioId: string, agentVersionId: string): RunBundle | null {
+    const row = this.db
+      .prepare(
+        `SELECT id FROM runs
+         WHERE scenario_id = ? AND agent_version_id = ? AND is_baseline = 1
+         ORDER BY started_at DESC
+         LIMIT 1`,
+      )
+      .get(scenarioId, agentVersionId) as { id: string } | undefined;
+    return row ? this.getRun(row.id) : null;
+  }
+
   compareSuites(baselineBatchId: string, candidateBatchId: string): SuiteComparison {
     const baselineRuns = this.getRunsBySuiteBatchId(baselineBatchId);
     const candidateRuns = this.getRunsBySuiteBatchId(candidateBatchId);
@@ -571,29 +615,31 @@ export class Storage {
   }
 
   private getRunRecord(runId: string): RunRecord | null {
-    return (
+    const row =
       (this.db
-        .prepare(
-          `SELECT id, scenario_id as scenarioId, scenario_file_hash as scenarioFileHash, agent_version_id as agentVersionId,
+      .prepare(
+        `SELECT id, scenario_id as scenarioId, scenario_file_hash as scenarioFileHash, agent_version_id as agentVersionId,
                   suite_batch_id as suiteBatchId, variant_set_name as variantSetName, variant_label as variantLabel,
                   prompt_version as promptVersion, model_version as modelVersion, tool_schema_version as toolSchemaVersion,
                   config_label as configLabel, config_hash as configHash, runtime_profile_name as runtimeProfileName,
                   suite_definition_name as suiteDefinitionName,
                   status, termination_reason as terminationReason, final_output as finalOutput, total_steps as totalSteps,
                   total_tool_calls as totalToolCalls, duration_ms as durationMs, total_tokens as totalTokens,
-                  total_cost_usd as totalCostUsd, score, started_at as startedAt, finished_at as finishedAt
+                  total_cost_usd as totalCostUsd, score, normalize_config_json as normalizeConfigJson,
+                  started_at as startedAt, finished_at as finishedAt
            FROM runs WHERE id = ?`,
-        )
-        .get(runId) as RunRecord | undefined) ?? null
-    );
-  }
+      )
+      .get(runId) as (RunRecord & { normalizeConfigJson?: string | null }) | undefined) ?? null;
 
-  private getRunRecordOrThrow(runId: string): RunRecord {
-    const run = this.getRunRecord(runId);
-    if (!run) {
-      throw new Error(`Run '${runId}' not found.`);
+    if (!row) {
+      return null;
     }
-    return run;
+
+    const { normalizeConfigJson, ...run } = row;
+    return {
+      ...run,
+      normalizeConfig: normalizeConfigJson ? JSON.parse(normalizeConfigJson) : undefined,
+    };
   }
 
   private writeTraceArtifact(runId: string, events: RunBundle["traceEvents"]): void {
@@ -609,6 +655,19 @@ export class Storage {
 
     if (!existing) {
       this.db.prepare(`INSERT INTO metadata (key, value) VALUES ('schema_version', ?)`).run(SCHEMA_VERSION);
+      return;
+    }
+
+    if (existing.value === "2" && SCHEMA_VERSION === "3") {
+      this.db.exec("BEGIN");
+      try {
+        this.ensureRunColumns();
+        this.db.prepare(`UPDATE metadata SET value = ? WHERE key = 'schema_version'`).run(SCHEMA_VERSION);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
       return;
     }
 
@@ -689,6 +748,12 @@ export class Storage {
     }
     if (!names.has("suite_definition_name")) {
       this.db.exec(`ALTER TABLE runs ADD COLUMN suite_definition_name TEXT`);
+    }
+    if (!names.has("is_baseline")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN is_baseline INTEGER NOT NULL DEFAULT 0`);
+    }
+    if (!names.has("normalize_config_json")) {
+      this.db.exec(`ALTER TABLE runs ADD COLUMN normalize_config_json TEXT`);
     }
   }
 
@@ -790,7 +855,9 @@ function compareRunBundles(baseline: RunBundle, candidate: RunBundle): RunCompar
   const runtimeDeltaMs = candidate.run.durationMs - baseline.run.durationMs;
   const stepDelta = candidate.run.totalSteps - baseline.run.totalSteps;
   const runtimePct = baseline.run.durationMs === 0 ? 0 : Math.round((runtimeDeltaMs / baseline.run.durationMs) * 100);
-  const outputChanged = baseline.run.finalOutput !== candidate.run.finalOutput;
+  const baselineOutput = normalizeOutput(baseline.run.finalOutput, baseline.run.normalizeConfig ?? []);
+  const candidateOutput = normalizeOutput(candidate.run.finalOutput, candidate.run.normalizeConfig ?? []);
+  const outputChanged = baselineOutput !== candidateOutput;
   if (outputChanged) {
     notes.push("Final output changed.");
   }

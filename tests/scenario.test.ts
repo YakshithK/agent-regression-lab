@@ -11,6 +11,10 @@ const invalidScenario = `id: test.invalid\nname: invalid\nsuite: test\ntask:\n  
 
 const validScenario = `id: test.valid\nname: valid\nsuite: test\ntask:\n  instructions: hi\ntools:\n  allowed:\n    - crm.search_customer\nevaluators:\n  - id: foo\n    type: final_answer_contains\n    mode: weighted\n    config:\n      required_substrings:\n        - ok`;
 
+const scenarioWithSnapshotFields = `id: test.snapshot\nname: snapshot\nsuite: test\nsetup_script: ./fixtures/setup.ts\nnormalize:\n  - strip_whitespace\n  - ignore_dates\ntask:\n  instructions: hi\ntools:\n  allowed:\n    - crm.search_customer\nevaluators:\n  - id: foo\n    type: final_answer_contains\n    mode: weighted\n    config:\n      required_substrings:\n        - ok`;
+
+const invalidNormalizeScenario = `id: test.invalid-normalize\nname: invalid normalize\nsuite: test\nnormalize: strip_whitespace\ntask:\n  instructions: hi\ntools:\n  allowed:\n    - crm.search_customer\nevaluators:\n  - id: foo\n    type: final_answer_contains\n    mode: weighted\n    config:\n      required_substrings:\n        - ok`;
+
 const invalidForbiddenToolsScenario = `id: test.invalid-forbidden\nname: invalid forbidden\nsuite: test\ntask:\n  instructions: hi\ntools:\n  allowed:\n    - crm.search_customer\n  forbidden:\n    tool: orders.refund_all\nevaluators:\n  - id: foo\n    type: final_answer_contains\n    mode: weighted\n    config:\n      required_substrings:\n        - ok`;
 
 async function writeTemp(name: string, content: string): Promise<string> {
@@ -53,6 +57,26 @@ test("loadScenarioByPath reads valid scenarios", async () => {
   try {
     const loaded = loadScenarioByPath(path);
     assert.strictEqual(loaded.definition.id, "test.valid");
+  } finally {
+    rmSync(path);
+  }
+});
+
+test("loadScenarioByPath reads setup_script and normalize fields", async () => {
+  const path = await writeTemp("snapshot", scenarioWithSnapshotFields);
+  try {
+    const loaded = loadScenarioByPath(path);
+    assert.equal(loaded.definition.setup_script, "./fixtures/setup.ts");
+    assert.deepEqual(loaded.definition.normalize, ["strip_whitespace", "ignore_dates"]);
+  } finally {
+    rmSync(path);
+  }
+});
+
+test("loadScenarioByPath rejects non-array normalize field", async () => {
+  const path = await writeTemp("invalid-normalize", invalidNormalizeScenario);
+  try {
+    assert.throws(() => loadScenarioByPath(path), /field 'normalize' must be an array of strings/);
   } finally {
     rmSync(path);
   }

@@ -217,6 +217,21 @@ function validateScenario(value: unknown, filePath: string, knownToolNames: Set<
     getRuntimeProfile(value.runtime_profile);
   }
 
+  if (value.setup_script !== undefined && (typeof value.setup_script !== "string" || value.setup_script.length === 0)) {
+    throw new Error(`Scenario file '${filePath}' field 'setup_script' must be a non-empty string.`);
+  }
+
+  if (value.normalize !== undefined) {
+    if (!Array.isArray(value.normalize)) {
+      throw new Error(`Scenario file '${filePath}' field 'normalize' must be an array of strings.`);
+    }
+    for (const rule of value.normalize) {
+      if (typeof rule !== "string") {
+        throw new Error(`Scenario file '${filePath}' field 'normalize' must be an array of strings.`);
+      }
+    }
+  }
+
   if (isObject(value.context) && Array.isArray(value.context.fixtures)) {
     for (const fixturePath of value.context.fixtures) {
       if (typeof fixturePath !== "string") {
