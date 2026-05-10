@@ -59,6 +59,9 @@ test("built cli responds to help and version", async (t) => {
 function createCliFixtureWorkspace(): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), "agentlab-cli-"));
   for (const relativePath of CLI_FIXTURE_PATHS) {
+    if (!existsSync(resolve(relativePath))) {
+      continue;
+    }
     cpSync(resolve(relativePath), join(fixtureRoot, relativePath), { recursive: true });
   }
   symlinkSync(resolve("node_modules"), join(fixtureRoot, "node_modules"), "dir");
