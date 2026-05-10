@@ -27,6 +27,7 @@ test("run --demo works without config or scenarios from any cwd", async () => {
   const workspace = mkdtempSync(join(tmpdir(), "arl_cli_demo_"));
   try {
     const result = await runCli(workspace, "run", "--demo");
+    assert.equal(result.stderr, "");
     assert.match(result.stdout, /Scenario: demo\.snapshot-companion/);
     assert.match(result.stdout, /Phase 1: establish a baseline/);
     assert.match(result.stdout, /PASS\s+Score: 100\/100/);

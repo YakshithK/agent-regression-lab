@@ -10,12 +10,35 @@ import { formatCliErrorMessage, formatRunIdentityLines, getFailedEvaluatorSummar
 import { initProject } from "./init.js";
 import type { AgentRuntimeConfig, RunBundle, VariantDefinition } from "./types.js";
 
+suppressNodeSqliteExperimentalWarning();
+
 const colorEnabled = (): boolean => Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
 const color = (code: number) => (text: string): string => (colorEnabled() ? `\x1b[${code}m${text}\x1b[0m` : text);
 const green = color(32);
 const red = color(31);
 const yellow = color(33);
 const dim = color(2);
+
+function suppressNodeSqliteExperimentalWarning(): void {
+  const originalEmitWarning = process.emitWarning.bind(process) as (warning: string | Error, ...args: unknown[]) => void;
+  process.emitWarning = ((warning: string | Error, ...args: unknown[]): void => {
+    const typeOrOptions = args[0];
+    const warningType =
+      warning instanceof Error
+        ? warning.name
+        : typeof typeOrOptions === "string"
+          ? typeOrOptions
+          : typeof typeOrOptions === "object" && typeOrOptions !== null && "type" in typeOrOptions
+            ? typeOrOptions.type
+            : undefined;
+    const warningMessage = warning instanceof Error ? warning.message : warning;
+    if (warningType === "ExperimentalWarning" && warningMessage.includes("SQLite is an experimental feature")) {
+      return;
+    }
+
+    return originalEmitWarning(warning, ...args);
+  }) as typeof process.emitWarning;
+}
 
 export async function main(): Promise<void> {
   const [, , command, ...args] = process.argv;
