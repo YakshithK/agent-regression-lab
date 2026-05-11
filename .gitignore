@@ -14,3 +14,4 @@ compact_summary.md
 .codex/
 CLAUDE.md
 *.tgz
+TODOS.node_modules
