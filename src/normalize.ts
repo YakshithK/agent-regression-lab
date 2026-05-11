@@ -1,6 +1,6 @@
-const SUPPORTED_RULES = ["strip_whitespace", "lowercase", "ignore_dates"] as const;
+export const SUPPORTED_NORMALIZE_RULES = ["strip_whitespace", "lowercase", "ignore_dates"] as const;
 
-export type NormalizeRule = (typeof SUPPORTED_RULES)[number];
+export type NormalizeRule = (typeof SUPPORTED_NORMALIZE_RULES)[number];
 
 const MONTH_PATTERN = [
   "January",
@@ -37,8 +37,8 @@ const MONTH_YEAR_PATTERN = new RegExp(`\\b(?:${MONTH_PATTERN})\\s+\\d{4}\\b`, "g
 export function normalizeOutput(text: string, rules: string[] = []): string {
   let output = text;
   for (const rule of rules) {
-    if (!isSupportedRule(rule)) {
-      throw new Error(`Unknown normalize rule: ${rule}. Supported: ${SUPPORTED_RULES.join(", ")}`);
+    if (!isSupportedNormalizeRule(rule)) {
+      throw new Error(`Unknown normalize rule: ${rule}. Supported: ${SUPPORTED_NORMALIZE_RULES.join(", ")}`);
     }
 
     if (rule === "strip_whitespace") {
@@ -56,6 +56,6 @@ export function normalizeOutput(text: string, rules: string[] = []): string {
   return output;
 }
 
-function isSupportedRule(rule: string): rule is NormalizeRule {
-  return (SUPPORTED_RULES as readonly string[]).includes(rule);
+export function isSupportedNormalizeRule(rule: string): rule is NormalizeRule {
+  return (SUPPORTED_NORMALIZE_RULES as readonly string[]).includes(rule);
 }

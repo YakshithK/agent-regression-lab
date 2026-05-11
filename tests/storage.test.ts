@@ -84,7 +84,7 @@ test("compareRuns includes evaluator and tool diffs", () => {
   }
 });
 
-test("saveRun stores normalize config and compareRuns uses stored normalization", () => {
+test("saveRun stores normalize config and compareRuns applies baseline normalization rules to both runs", () => {
   const storage = new Storage();
   try {
     storage.upsertAgentVersion(agentVersion);
@@ -95,7 +95,7 @@ test("saveRun stores normalize config and compareRuns uses stored normalization"
     });
     const candidate = makeBundle(`run_normalize_candidate_${Date.now()}`, {
       finalOutput: "Refunded on 2026-05-11",
-      normalizeConfig: ["ignore_dates"],
+      normalizeConfig: [],
     });
 
     storage.saveRun(baseline);

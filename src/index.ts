@@ -10,8 +10,6 @@ import { formatCliErrorMessage, formatRunIdentityLines, getFailedEvaluatorSummar
 import { initProject } from "./init.js";
 import type { AgentRuntimeConfig, RunBundle, VariantDefinition } from "./types.js";
 
-suppressNodeSqliteExperimentalWarning();
-
 const colorEnabled = (): boolean => Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
 const color = (code: number) => (text: string): string => (colorEnabled() ? `\x1b[${code}m${text}\x1b[0m` : text);
 const green = color(32);
@@ -41,6 +39,7 @@ function suppressNodeSqliteExperimentalWarning(): void {
 }
 
 export async function main(): Promise<void> {
+  suppressNodeSqliteExperimentalWarning();
   const [, , command, ...args] = process.argv;
 
   switch (command) {
@@ -981,5 +980,12 @@ function isEntrypoint(): boolean {
   if (!entry) {
     return false;
   }
-  return basename(entry) === "agentlab" || realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+  if (basename(entry) === "agentlab") {
+    return true;
+  }
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+  } catch {
+    return false;
+  }
 }

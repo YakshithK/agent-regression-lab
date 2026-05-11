@@ -14,6 +14,7 @@ const validScenario = `id: test.valid\nname: valid\nsuite: test\ntask:\n  instru
 const scenarioWithSnapshotFields = `id: test.snapshot\nname: snapshot\nsuite: test\nsetup_script: ./fixtures/setup.ts\nnormalize:\n  - strip_whitespace\n  - ignore_dates\ntask:\n  instructions: hi\ntools:\n  allowed:\n    - crm.search_customer\nevaluators:\n  - id: foo\n    type: final_answer_contains\n    mode: weighted\n    config:\n      required_substrings:\n        - ok`;
 
 const invalidNormalizeScenario = `id: test.invalid-normalize\nname: invalid normalize\nsuite: test\nnormalize: strip_whitespace\ntask:\n  instructions: hi\ntools:\n  allowed:\n    - crm.search_customer\nevaluators:\n  - id: foo\n    type: final_answer_contains\n    mode: weighted\n    config:\n      required_substrings:\n        - ok`;
+const invalidNormalizeRuleScenario = `id: test.invalid-normalize-rule\nname: invalid normalize rule\nsuite: test\nnormalize:\n  - strip_whitespace\n  - typo_rule\ntask:\n  instructions: hi\ntools:\n  allowed:\n    - crm.search_customer\nevaluators:\n  - id: foo\n    type: final_answer_contains\n    mode: weighted\n    config:\n      required_substrings:\n        - ok`;
 
 const invalidForbiddenToolsScenario = `id: test.invalid-forbidden\nname: invalid forbidden\nsuite: test\ntask:\n  instructions: hi\ntools:\n  allowed:\n    - crm.search_customer\n  forbidden:\n    tool: orders.refund_all\nevaluators:\n  - id: foo\n    type: final_answer_contains\n    mode: weighted\n    config:\n      required_substrings:\n        - ok`;
 
@@ -77,6 +78,18 @@ test("loadScenarioByPath rejects non-array normalize field", async () => {
   const path = await writeTemp("invalid-normalize", invalidNormalizeScenario);
   try {
     assert.throws(() => loadScenarioByPath(path), /field 'normalize' must be an array of strings/);
+  } finally {
+    rmSync(path);
+  }
+});
+
+test("loadScenarioByPath rejects unknown normalize rules", async () => {
+  const path = await writeTemp("invalid-normalize-rule", invalidNormalizeRuleScenario);
+  try {
+    assert.throws(
+      () => loadScenarioByPath(path),
+      /unknown normalize rule 'typo_rule'.*Supported rules: strip_whitespace, lowercase, ignore_dates/s,
+    );
   } finally {
     rmSync(path);
   }

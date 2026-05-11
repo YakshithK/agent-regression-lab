@@ -855,8 +855,9 @@ function compareRunBundles(baseline: RunBundle, candidate: RunBundle): RunCompar
   const runtimeDeltaMs = candidate.run.durationMs - baseline.run.durationMs;
   const stepDelta = candidate.run.totalSteps - baseline.run.totalSteps;
   const runtimePct = baseline.run.durationMs === 0 ? 0 : Math.round((runtimeDeltaMs / baseline.run.durationMs) * 100);
-  const baselineOutput = normalizeOutput(baseline.run.finalOutput, baseline.run.normalizeConfig ?? []);
-  const candidateOutput = normalizeOutput(candidate.run.finalOutput, candidate.run.normalizeConfig ?? []);
+  const normalizationRules = baseline.run.normalizeConfig ?? [];
+  const baselineOutput = normalizeOutput(baseline.run.finalOutput, normalizationRules);
+  const candidateOutput = normalizeOutput(candidate.run.finalOutput, normalizationRules);
   const outputChanged = baselineOutput !== candidateOutput;
   if (outputChanged) {
     notes.push("Final output changed.");

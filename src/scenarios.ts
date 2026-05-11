@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 import { parse } from "yaml";
 
 import { getRuntimeProfile, getSuiteDefinition, loadAgentLabConfig } from "./config.js";
+import { isSupportedNormalizeRule, SUPPORTED_NORMALIZE_RULES } from "./normalize.js";
 import { getBuiltinToolSpecs } from "./tools.js";
 import type { ConversationScenarioDefinition, ScenarioDefinition, ScenarioSummary } from "./types.js";
 
@@ -228,6 +229,12 @@ function validateScenario(value: unknown, filePath: string, knownToolNames: Set<
     for (const rule of value.normalize) {
       if (typeof rule !== "string") {
         throw new Error(`Scenario file '${filePath}' field 'normalize' must be an array of strings.`);
+      }
+      if (!isSupportedNormalizeRule(rule)) {
+        throw new Error(
+          `Scenario file '${filePath}' has unknown normalize rule '${rule}'. ` +
+            `Supported rules: ${SUPPORTED_NORMALIZE_RULES.join(", ")}.`,
+        );
       }
     }
   }

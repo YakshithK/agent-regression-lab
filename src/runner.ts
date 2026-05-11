@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { extname, isAbsolute, resolve } from "node:path";
+import { dirname, extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { getRuntimeProfile } from "./config.js";
@@ -31,7 +31,7 @@ type RunnerDeps = {
 };
 
 const SETUP_SCRIPT_TIMEOUT_MS = 30_000;
-const TSX_BIN = resolve(fileURLToPath(import.meta.url), "..", "..", "node_modules", ".bin", "tsx");
+const TSX_BIN = resolve(dirname(fileURLToPath(import.meta.url)), "..", "node_modules", ".bin", "tsx");
 
 export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
   if (deps.scenario.setup_script) {
