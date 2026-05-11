@@ -21,9 +21,10 @@
   ],
   "type": "module",
   "bin": {
-    "agentlab": "./dist/index.js"
+    "agentlab": "bin/agentlab.js"
   },
   "files": [
+    "bin",
     "dist",
     "dist/ui-assets",
     "README.md",

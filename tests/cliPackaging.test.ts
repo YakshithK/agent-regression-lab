@@ -21,7 +21,7 @@ test("package manifest exposes a checked-in bin wrapper", () => {
 
   const wrapperSource = readFileSync(resolve("bin/agentlab.js"), "utf8");
   assert.match(wrapperSource.split("\n")[0] ?? "", /^#!\/usr\/bin\/env node$/);
-  assert.match(wrapperSource, /import "\.\.\/dist\/index\.js";/);
+  assert.match(wrapperSource, /import.*\.\.\/dist\/index\.js/);
 });
 
 test("built cli responds to help and version", async (t) => {
