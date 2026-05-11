@@ -986,6 +986,7 @@ function isEntrypoint(): boolean {
   try {
     return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
   } catch {
+    // Some runtimes set argv[1] to a non-filesystem value (e.g. --eval).
     return false;
   }
 }
