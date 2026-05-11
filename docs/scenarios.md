@@ -32,6 +32,8 @@ Common optional fields:
 - `runtime_profile`
 - `runtime`
 - task `context`
+- `setup_script` — pre-run fixture setup
+- `normalize` — output normalization rules
 
 ### Example
 
@@ -87,6 +89,74 @@ Runtime profiles let you apply reusable degraded-tool conditions without duplica
 
 - task scenarios: tool fault injection is active
 - conversation scenarios: config reference is allowed for shared authoring, but ARL does not yet inject faults into the HTTP agent's internal tools
+
+### Setup Scripts
+
+Pre-run setup scripts execute TypeScript fixtures before the scenario runs. Use them to seed databases, warm caches, or initialize complex test state.
+
+```yaml
+setup_script: ./fixtures/seed-orders.ts
+```
+
+Rules:
+- Must be a relative path (absolute paths rejected)
+- Must point to a `.ts` file (executed via `tsx`)
+- Cannot contain parent directory traversal (`..`)
+- Executes with a 30-second timeout
+- Failures abort the run with stderr output
+
+Example setup script (`fixtures/seed-orders.ts`):
+
+```typescript
+// Seed the local fixture database before the scenario runs
+import Database from "better-sqlite3";
+
+const db = new Database("artifacts/test.db");
+db.exec(`
+  INSERT INTO orders (order_id, customer_email, amount, created_at) VALUES
+  ('ord_1024', 'alice@example.com', 99.99, '2026-01-15');
+`);
+db.close();
+```
+
+### Output Normalization
+
+When comparing runs, normalize agent output to ignore cosmetic differences and focus on semantic changes.
+
+```yaml
+normalize:
+  - strip_whitespace
+  - lowercase
+  - ignore_dates
+```
+
+Available rules:
+
+| Rule | Effect |
+|------|--------|
+| `strip_whitespace` | Remove leading/trailing whitespace and collapse internal whitespace to single spaces |
+| `lowercase` | Convert all text to lowercase |
+| `ignore_dates` | Replace dates with `[DATE]` placeholder (ISO format: YYYY-MM-DD, natural language: "May 8 2026", "8 May 2026", "May 2026") |
+
+Normalization applies to:
+- agent final output
+- tool call parameters and results
+- comparison diffs
+
+Use normalization to:
+- compare prompts that don't affect agent quality (whitespace, capitalization)
+- ignore dates that will naturally differ between runs
+- reduce false-positive regressions from formatting changes
+
+Rules apply in order. Example:
+
+```yaml
+normalize:
+  - ignore_dates
+  - lowercase
+```
+
+This normalizes dates first, then lowercases the result.
 
 ### Evaluators
 
@@ -396,6 +466,77 @@ agentlab run --suite support --agent mock-default
 ```bash
 agentlab compare --suite <baseline-batch-id> <candidate-batch-id>
 ```
+
+---
+
+## Baseline Approval Workflow
+
+Snapshot the behavior of your agent when it's working correctly. Then, when you change a prompt or model, compare new runs against that snapshot to catch regressions.
+
+### Approve a Baseline
+
+Run a scenario and get a run ID:
+
+```bash
+agentlab run support.refund-correct-order --agent my-agent
+# Output: Run: run_1778520123456
+```
+
+Approve that run as the baseline:
+
+```bash
+agentlab approve run_1778520123456
+# Output: Approved baseline for scenario support.refund-correct-order
+```
+
+Baselines are scoped per `(scenario, agent_version)` pair. Approving a new baseline clears the old one for that scenario+agent.
+
+### Compare Against Baseline
+
+After changing your prompt or model, run the same scenario:
+
+```bash
+agentlab run support.refund-correct-order --agent my-agent
+# Output: Run: run_1778520234567
+```
+
+Compare the new run against the approved baseline:
+
+```bash
+agentlab compare --baseline support.refund-correct-order run_1778520234567
+```
+
+The output shows:
+- Baseline run ID and score
+- Candidate run ID and score
+- Classification: PASS, REGRESSED, or IMPROVED
+- Per-evaluator changes
+- Output diffs (if any)
+
+Example output:
+
+```
+Scenario: support.refund-correct-order
+Baseline: run_1778520123456 (PASS 100/100)
+Candidate: run_1778520234567 (PASS 100/100)
+Classification: PASS
+No regressions detected.
+```
+
+### Workflow
+
+1. Run and approve a baseline when agent behavior is correct
+2. Change your prompt, model, or tools
+3. Run the scenario again
+4. Compare against the baseline
+5. If regressed, fix and iterate
+6. When ready, approve the new run as the baseline
+
+This workflow replaces manual run-ID tracking. Use it for:
+- pre-merge validation
+- iterating on prompts
+- A/B testing model or tool changes
+- building historical regression suites
 
 ---
 

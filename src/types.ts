@@ -128,6 +128,8 @@ export type ScenarioDefinition = {
   tags?: string[];
   difficulty?: string;
   runtime_profile?: string;
+  setup_script?: string;
+  normalize?: string[];
   task: {
     instructions: string;
     success_hint?: string;
@@ -321,6 +323,7 @@ export type RunRecord = {
   configHash?: string;
   runtimeProfileName?: string;
   suiteDefinitionName?: string;
+  normalizeConfig?: string[];
   status: RunStatus;
   terminationReason: TerminationReason;
   finalOutput: string;

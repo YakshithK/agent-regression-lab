@@ -4,6 +4,7 @@ import { join, relative, resolve } from "node:path";
 import { parse } from "yaml";
 
 import { getRuntimeProfile, getSuiteDefinition, loadAgentLabConfig } from "./config.js";
+import { isSupportedNormalizeRule, SUPPORTED_NORMALIZE_RULES } from "./normalize.js";
 import { getBuiltinToolSpecs } from "./tools.js";
 import type { ConversationScenarioDefinition, ScenarioDefinition, ScenarioSummary } from "./types.js";
 
@@ -215,6 +216,27 @@ function validateScenario(value: unknown, filePath: string, knownToolNames: Set<
       throw new Error(`Scenario file '${filePath}' field 'runtime_profile' must be a non-empty string.`);
     }
     getRuntimeProfile(value.runtime_profile);
+  }
+
+  if (value.setup_script !== undefined && (typeof value.setup_script !== "string" || value.setup_script.length === 0)) {
+    throw new Error(`Scenario file '${filePath}' field 'setup_script' must be a non-empty string.`);
+  }
+
+  if (value.normalize !== undefined) {
+    if (!Array.isArray(value.normalize)) {
+      throw new Error(`Scenario file '${filePath}' field 'normalize' must be an array of strings.`);
+    }
+    for (const rule of value.normalize) {
+      if (typeof rule !== "string") {
+        throw new Error(`Scenario file '${filePath}' field 'normalize' must be an array of strings.`);
+      }
+      if (!isSupportedNormalizeRule(rule)) {
+        throw new Error(
+          `Scenario file '${filePath}' has unknown normalize rule '${rule}'. ` +
+            `Supported rules: ${SUPPORTED_NORMALIZE_RULES.join(", ")}.`,
+        );
+      }
+    }
   }
 
   if (isObject(value.context) && Array.isArray(value.context.fixtures)) {

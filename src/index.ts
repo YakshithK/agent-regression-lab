@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import packageJson from "../package.json" with { type: "json" };
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
+import { basename } from "node:path";
 import { createAgentFactory } from "./agent/factory.js";
 import { getAgentRegistration, getVariantSet } from "./config.js";
 import { createConfigHash, createSuiteBatchId } from "./lib/id.js";
@@ -8,7 +10,36 @@ import { formatCliErrorMessage, formatRunIdentityLines, getFailedEvaluatorSummar
 import { initProject } from "./init.js";
 import type { AgentRuntimeConfig, RunBundle, VariantDefinition } from "./types.js";
 
+const colorEnabled = (): boolean => Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
+const color = (code: number) => (text: string): string => (colorEnabled() ? `\x1b[${code}m${text}\x1b[0m` : text);
+const green = color(32);
+const red = color(31);
+const yellow = color(33);
+const dim = color(2);
+
+function suppressNodeSqliteExperimentalWarning(): void {
+  const originalEmitWarning = process.emitWarning.bind(process) as (warning: string | Error, ...args: unknown[]) => void;
+  process.emitWarning = ((warning: string | Error, ...args: unknown[]): void => {
+    const typeOrOptions = args[0];
+    const warningType =
+      warning instanceof Error
+        ? warning.name
+        : typeof typeOrOptions === "string"
+          ? typeOrOptions
+          : typeof typeOrOptions === "object" && typeOrOptions !== null && "type" in typeOrOptions
+            ? typeOrOptions.type
+            : undefined;
+    const warningMessage = warning instanceof Error ? warning.message : warning;
+    if (warningType === "ExperimentalWarning" && warningMessage.includes("SQLite is an experimental feature")) {
+      return;
+    }
+
+    return originalEmitWarning(warning, ...args);
+  }) as typeof process.emitWarning;
+}
+
 export async function main(): Promise<void> {
+  suppressNodeSqliteExperimentalWarning();
   const [, , command, ...args] = process.argv;
 
   switch (command) {
@@ -34,6 +65,9 @@ export async function main(): Promise<void> {
     case "compare":
       await handleCompare(args);
       break;
+    case "approve":
+      await handleApprove(args);
+      break;
     case "ui":
       await handleUi();
       break;
@@ -53,8 +87,11 @@ function printUsage(): void {
   agentlab run --suite <suite-id> [--agent <name>] [--provider mock|openai|external_process|http] [--model <model>] [--agent-label <label>]
   agentlab run --suite-def <name> [--agent <name>]
   agentlab run <scenario-id> [--variant-set <name>]
+  agentlab run --demo
   agentlab show <run-id>
+  agentlab approve <run-id>
   agentlab compare <baseline-run-id> <candidate-run-id>
+  agentlab compare --baseline <scenario-id> <candidate-run-id>
   agentlab compare --suite <baseline-batch-id> <candidate-batch-id>
   agentlab ui
   agentlab help
@@ -89,6 +126,11 @@ async function handleInit(args: string[]): Promise<void> {
 
 async function handleRun(args: string[]): Promise<void> {
   const parsed = parseRunArgs(args);
+  if (parsed.demo) {
+    await executeDemo();
+    return;
+  }
+
   const runtimeConfig = validateRuntimeConfig(parsed.runtimeConfig);
   const { loadScenariosBySuite, loadScenariosBySuiteDefinition } = await import("./scenarios.js");
 
@@ -203,6 +245,164 @@ async function handleRun(args: string[]): Promise<void> {
     await executeConversation(scenarioId, httpConfig, runtimeConfig.label);
   } else {
     await executeOne(scenarioId, runtimeConfig);
+  }
+}
+
+async function executeDemo(): Promise<RunBundle> {
+  const [{ Storage }, { runScenario }, { DEMO_SCENARIO, DEMO_REGRESSION_SCENARIO, DEMO_TOOL_SPECS, DEMO_TOOLS }] = await Promise.all([
+    import("./storage.js"),
+    import("./runner.js"),
+    import("./demo.js"),
+  ]);
+  const storage = new Storage();
+  try {
+    storage.upsertScenario(
+      {
+        id: DEMO_SCENARIO.id,
+        name: DEMO_SCENARIO.name,
+        suite: DEMO_SCENARIO.suite,
+        difficulty: DEMO_SCENARIO.difficulty,
+        description: DEMO_SCENARIO.description,
+      },
+      DEMO_SCENARIO,
+      "<demo>",
+      "demo",
+    );
+
+    const runtimeConfig: AgentRuntimeConfig = { provider: "mock", label: "mock-demo" };
+    const factory = createAgentFactory(runtimeConfig);
+    const agentVersion = factory.createVersion(runtimeConfig);
+    storage.upsertAgentVersion(agentVersion);
+
+    printDemoIntro();
+    console.log("Phase 1: establish a baseline");
+    const baseline = await withSpinner("Running demo scenario (pass)...", () =>
+      runScenario({
+        agentAdapter: factory.createAdapter(),
+        agentVersion,
+        scenario: DEMO_SCENARIO,
+        scenarioFileHash: "demo",
+        toolSpecs: DEMO_TOOL_SPECS,
+        tools: DEMO_TOOLS,
+      }),
+    );
+    baseline.agentVersion = agentVersion;
+    storage.saveRun(baseline);
+    storage.approveRun(baseline.run.id);
+    printDemoRunReplay(baseline);
+    printDemoVerdict(baseline);
+    console.log("Approved as baseline.");
+    console.log("");
+
+    console.log("Simulating a prompt change...");
+    const candidate = await withSpinner("Running demo scenario (degraded mode)...", () =>
+      runScenario({
+        agentAdapter: factory.createAdapter(),
+        agentVersion,
+        scenario: DEMO_REGRESSION_SCENARIO,
+        scenarioFileHash: "demo",
+        toolSpecs: DEMO_TOOL_SPECS,
+        tools: DEMO_TOOLS,
+      }),
+    );
+    candidate.agentVersion = agentVersion;
+    storage.saveRun(candidate);
+    printDemoRunReplay(candidate);
+    printDemoVerdict(candidate, { regression: true });
+    printDemoComparison(storage.compareRuns(baseline.run.id, candidate.run.id));
+    printDemoCta();
+    return candidate;
+  } finally {
+    storage.close();
+  }
+}
+
+function printDemoIntro(): void {
+  console.log("Scenario: demo.snapshot-companion");
+  console.log('Task: "Use the bundled demo notes to answer today\'s date."');
+  console.log("");
+}
+
+function printDemoRunReplay(bundle: RunBundle): void {
+  console.log(line());
+  console.log("Trace");
+  const toolCalls = [...bundle.toolCalls].sort((left, right) => left.stepIndex - right.stepIndex);
+  toolCalls.forEach((call, index) => {
+    console.log(`  Step ${index + 1}  ${call.toolName}(${formatInlineObject(call.input)})`);
+    console.log(`          -> ${formatInlineObject(call.output)}`);
+  });
+  console.log(`  Answer  "${bundle.run.finalOutput}"`);
+  console.log(line());
+}
+
+function printDemoVerdict(bundle: RunBundle, options: { regression?: boolean } = {}): void {
+  const status = bundle.run.status === "pass" ? green("PASS") : red("FAIL");
+  if (options.regression && bundle.run.status !== "pass") {
+    console.log(`${status}  Score: ${bundle.run.score}/100 -- regression detected  (${bundle.run.totalToolCalls} tool calls, ${bundle.run.durationMs}ms)`);
+    return;
+  }
+  console.log(`${status}  Score: ${bundle.run.score}/100  (${bundle.run.totalToolCalls} tool calls, ${bundle.run.durationMs}ms)`);
+  if (bundle.run.status === "pass") {
+    console.log("The agent found the answer using 2 tool calls -- within budget.");
+  }
+}
+
+function printDemoComparison(comparison: import("./types.js").RunComparison): void {
+  console.log("");
+  console.log("What changed:");
+  const evaluatorIds = new Set([
+    ...comparison.baseline.evaluatorResults.map((result) => result.evaluatorId),
+    ...comparison.candidate.evaluatorResults.map((result) => result.evaluatorId),
+  ]);
+  for (const evaluatorId of [...evaluatorIds].sort()) {
+    const baseline = comparison.baseline.evaluatorResults.find((result) => result.evaluatorId === evaluatorId);
+    const candidate = comparison.candidate.evaluatorResults.find((result) => result.evaluatorId === evaluatorId);
+    if (baseline?.status === candidate?.status) {
+      console.log(`  ${green("OK")}  ${evaluatorId}   unchanged`);
+    } else {
+      console.log(`  ${red("FAIL")}  ${evaluatorId}   was: ${baseline?.status.toUpperCase() ?? "MISSING"}   now: ${candidate?.status.toUpperCase() ?? "MISSING"}`);
+    }
+  }
+  console.log("");
+  console.log("This is what agent regression testing catches.");
+}
+
+function printDemoCta(): void {
+  console.log(line());
+  console.log("Ready to test your own agent?");
+  console.log("  agentlab init        bootstrap a new project");
+  console.log("  agentlab run --help  see all options");
+}
+
+function line(): string {
+  return dim("--------------------------------------------------");
+}
+
+function formatInlineObject(value: unknown): string {
+  if (value === undefined) {
+    return "undefined";
+  }
+  return JSON.stringify(value);
+}
+
+async function withSpinner<T>(message: string, fn: () => Promise<T>): Promise<T> {
+  if (!process.stdout.isTTY) {
+    return await fn();
+  }
+
+  const frames = ["-", "\\", "|", "/"];
+  let index = 0;
+  process.stdout.write(`  ${frames[index]}  ${message}`);
+  const interval = setInterval(() => {
+    index = (index + 1) % frames.length;
+    process.stdout.write(`\r  ${frames[index]}  ${message}`);
+  }, 80);
+
+  try {
+    return await fn();
+  } finally {
+    clearInterval(interval);
+    process.stdout.write(`\r${" ".repeat(message.length + 6)}\r`);
   }
 }
 
@@ -445,6 +645,9 @@ function printRunSummary(bundle: RunBundle): void {
     console.log(line);
   }
   console.log(`Runtime: ${bundle.run.durationMs}ms`);
+  if (bundle.run.status === "pass") {
+    console.log("No regressions yet -- approve this run to set a baseline.");
+  }
   if (bundle.run.status !== "pass") {
     console.log(`Reason: ${bundle.run.terminationReason}`);
     const errorDetail = getRunErrorDetail(bundle);
@@ -503,6 +706,7 @@ async function handleShow(args: string[]): Promise<void> {
 
 async function handleCompare(args: string[]): Promise<void> {
   const isSuiteCompare = args[0] === "--suite";
+  const isBaselineCompare = args[0] === "--baseline";
   const { Storage } = await import("./storage.js");
   const storage = new Storage();
   try {
@@ -551,40 +755,94 @@ async function handleCompare(args: string[]): Promise<void> {
       return;
     }
 
+    if (isBaselineCompare) {
+      const scenarioId = args[1];
+      const candidateRunId = args[2];
+      if (!scenarioId || !candidateRunId) {
+        throw new Error("Missing scenario id or candidate run id.");
+      }
+
+      const candidate = storage.getRun(candidateRunId);
+      if (!candidate) {
+        throw new Error(`Run '${candidateRunId}' not found.`);
+      }
+      const baseline = storage.getBaselineRun(scenarioId, candidate.run.agentVersionId);
+      if (!baseline) {
+        const agentLabel = candidate.agentVersion?.label ?? candidate.run.agentVersionId;
+        throw new Error(`No baseline found for scenario ${scenarioId} with agent ${agentLabel}. Run \`agentlab approve <run-id>\` first.`);
+      }
+
+      printRunComparison(storage.compareRuns(baseline.run.id, candidate.run.id));
+      return;
+    }
+
     const [baselineRunId, candidateRunId] = args;
     if (!baselineRunId || !candidateRunId) {
       throw new Error("Missing baseline or candidate run id.");
     }
 
-    const comparison = storage.compareRuns(baselineRunId, candidateRunId);
-    console.log(`Scenario: ${comparison.baseline.run.scenarioId}`);
-    console.log(`Baseline: ${comparison.baseline.run.id} (${comparison.baseline.run.status.toUpperCase()} ${comparison.baseline.run.score}/100)`);
-    console.log(`Candidate: ${comparison.candidate.run.id} (${comparison.candidate.run.status.toUpperCase()} ${comparison.candidate.run.score}/100)`);
-    console.log(`Classification: ${comparison.classification.toUpperCase()}`);
-    console.log("Changes:");
-    if (comparison.notes.length === 0) {
-      console.log("- No material changes.");
-    } else {
-      for (const note of comparison.notes) {
-        console.log(`- ${note}`);
-      }
-    }
-
-    if (comparison.evaluatorDiffs.length > 0) {
-      console.log("Evaluator diffs:");
-      for (const diff of comparison.evaluatorDiffs) {
-        console.log(`- ${diff.note}`);
-      }
-    }
-
-    if (comparison.toolDiffs.length > 0) {
-      console.log("Tool diffs:");
-      for (const diff of comparison.toolDiffs) {
-        console.log(`- ${diff.note}`);
-      }
-    }
+    printRunComparison(storage.compareRuns(baselineRunId, candidateRunId));
   } finally {
     storage.close();
+  }
+}
+
+async function handleApprove(args: string[]): Promise<void> {
+  const runId = args[0];
+  if (!runId) {
+    throw new Error("Missing run id.");
+  }
+
+  const { Storage } = await import("./storage.js");
+  const storage = new Storage();
+  try {
+    const result = storage.approveRun(runId);
+    if (result.status === "not_found") {
+      throw new Error("run-id not found");
+    }
+    if (result.status === "already_baseline") {
+      console.log(`Already the baseline for scenario ${result.run.scenarioId}`);
+      return;
+    }
+    console.log(`Approved baseline for scenario ${result.run.scenarioId}`);
+  } finally {
+    storage.close();
+  }
+}
+
+export function printRunComparison(comparison: import("./types.js").RunComparison): void {
+  console.log(`Scenario: ${comparison.baseline.run.scenarioId}`);
+  console.log(`Baseline: ${comparison.baseline.run.id} (${comparison.baseline.run.status.toUpperCase()} ${comparison.baseline.run.score}/100)`);
+  console.log(`Candidate: ${comparison.candidate.run.id} (${comparison.candidate.run.status.toUpperCase()} ${comparison.candidate.run.score}/100)`);
+  console.log(`Classification: ${comparison.classification.toUpperCase()}`);
+  console.log("Changes:");
+  if (comparison.notes.length === 0) {
+    console.log("- No material changes.");
+  } else {
+    for (const note of comparison.notes) {
+      console.log(`- ${note}`);
+    }
+  }
+
+  if (comparison.evaluatorDiffs.length > 0) {
+    console.log("Evaluator diffs:");
+    for (const diff of comparison.evaluatorDiffs) {
+      console.log(`- ${diff.note}`);
+    }
+  }
+
+  if (comparison.toolDiffs.length > 0) {
+    console.log("Tool diffs:");
+    for (const diff of comparison.toolDiffs) {
+      console.log(`- ${diff.note}`);
+    }
+  }
+
+  const scoreDelta = comparison.candidate.run.score - comparison.baseline.run.score;
+  if (scoreDelta > 0) {
+    console.log(`Score improved ${comparison.baseline.run.score} -> ${comparison.candidate.run.score} -- your agent got better.`);
+  } else if (!["regressed", "unchanged_fail"].includes(comparison.classification)) {
+    console.log("No regressions detected.");
   }
 }
 
@@ -597,6 +855,7 @@ function parseRunArgs(args: string[]): {
   suite?: string;
   suiteDefinition?: string;
   variantSetName?: string;
+  demo: boolean;
   runtimeConfig: AgentRuntimeConfig;
 } {
   const runtimeConfig: AgentRuntimeConfig = { provider: "mock" };
@@ -604,9 +863,14 @@ function parseRunArgs(args: string[]): {
   let suite: string | undefined;
   let suiteDefinition: string | undefined;
   let variantSetName: string | undefined;
+  let demo = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === "--demo") {
+      demo = true;
+      continue;
+    }
     if (arg === "--suite") {
       suite = args[index + 1];
       index += 1;
@@ -654,7 +918,7 @@ function parseRunArgs(args: string[]): {
     throw new Error(`Unexpected argument '${arg}'.`);
   }
 
-  return { scenarioId, suite, suiteDefinition, variantSetName, runtimeConfig };
+  return { scenarioId, suite, suiteDefinition, variantSetName, demo, runtimeConfig };
 }
 
 function validateRuntimeConfig(config: AgentRuntimeConfig): AgentRuntimeConfig {
@@ -716,5 +980,13 @@ function isEntrypoint(): boolean {
   if (!entry) {
     return false;
   }
-  return import.meta.url === pathToFileURL(entry).href;
+  if (basename(entry) === "agentlab") {
+    return true;
+  }
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entry);
+  } catch {
+    // Some runtimes set argv[1] to a non-filesystem value (e.g. --eval).
+    return false;
+  }
 }

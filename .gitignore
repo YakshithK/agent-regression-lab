@@ -9,5 +9,9 @@ superpowers/
 .worktrees/
 *.mp4
 *.Identifier
-TODOS.node_modules
 .gstack/*
+compact_summary.md
+.codex/
+CLAUDE.md
+*.tgz
+TODOS.node_modules

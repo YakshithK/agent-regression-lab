@@ -1,4 +1,8 @@
 import { performance } from "node:perf_hooks";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, extname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { getRuntimeProfile } from "./config.js";
 import { createToolCallId, createRunId } from "./lib/id.js";
@@ -26,7 +30,14 @@ type RunnerDeps = {
   tools: Record<string, (input: unknown, context: { scenarioId: string }) => Promise<unknown>>;
 };
 
+const SETUP_SCRIPT_TIMEOUT_MS = 30_000;
+const TSX_BIN = resolve(dirname(fileURLToPath(import.meta.url)), "..", "node_modules", ".bin", "tsx");
+
 export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
+  if (deps.scenario.setup_script) {
+    await runSetupScript(deps.scenario.setup_script);
+  }
+
   const runId = createRunId();
   const startedAt = new Date().toISOString();
   const runStart = performance.now();
@@ -188,6 +199,7 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
     totalToolCalls: toolCalls.length,
     durationMs,
     score: 0,
+    normalizeConfig: deps.scenario.normalize,
     startedAt,
     finishedAt,
   };
@@ -234,6 +246,73 @@ export async function runScenario(deps: RunnerDeps): Promise<RunBundle> {
   };
 
   return bundle;
+}
+
+async function runSetupScript(scriptPath: string): Promise<void> {
+  if (isAbsolute(scriptPath)) {
+    throw new Error("setup_script must be a relative path.");
+  }
+
+  const pathParts = scriptPath.split(/[\\/]+/);
+  if (pathParts.includes("..")) {
+    throw new Error("setup_script cannot contain parent directory traversal.");
+  }
+
+  if (extname(scriptPath) !== ".ts") {
+    throw new Error("setup_script must point to a .ts file.");
+  }
+
+  const absolutePath = resolve(scriptPath);
+  if (!existsSync(absolutePath)) {
+    throw new Error(`setup_script file not found: ${scriptPath}`);
+  }
+
+  await new Promise<void>((resolvePromise, reject) => {
+    const child = spawn(TSX_BIN, [absolutePath], {
+      cwd: process.cwd(),
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+
+    let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill("SIGTERM");
+      reject(new Error(`setup_script timed out after ${SETUP_SCRIPT_TIMEOUT_MS / 1000}s: ${scriptPath}`));
+    }, SETUP_SCRIPT_TIMEOUT_MS);
+    timeout.unref?.();
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error(`setup_script failed to start: ${error.message}`));
+    });
+
+    child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolvePromise();
+        return;
+      }
+      const detail = stderr.trim() || `exit code ${code ?? "unknown"}`;
+      reject(new Error(`setup_script failed: ${scriptPath}\n${detail}`));
+    });
+  });
 }
 
 function hasTimedOut(deadline?: number): boolean {
