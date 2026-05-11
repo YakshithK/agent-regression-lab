@@ -92,31 +92,50 @@ npm link
 agentlab --help
 ```
 
-3. List scenarios:
+3. Try the zero-config demo (no config or scenarios needed):
+
+```bash
+agentlab run --demo
+```
+
+This runs a 2-phase narrative demo: baseline run → simulated prompt change → regression caught. Useful for understanding the workflow without setup.
+
+4. List scenarios:
 
 ```bash
 agentlab list scenarios
 ```
 
-4. Run a deterministic sample scenario:
+5. Run a deterministic sample scenario:
 
 ```bash
 agentlab run support.refund-correct-order --agent mock-default
 ```
 
-5. Inspect the run:
+6. Approve a baseline and compare new runs against it:
+
+```bash
+agentlab approve <run-id>
+agentlab run support.refund-correct-order --agent mock-default
+agentlab compare --baseline support.refund-correct-order <new-run-id>
+```
+
+This is the core workflow: snapshot a known-good run, then verify future changes against it.
+
+7. Inspect the run:
 
 ```bash
 agentlab show <run-id>
 ```
 
-6. Run the same scenario again, then compare the two runs:
+8. Run the same scenario again, then do a direct comparison:
 
 ```bash
+agentlab run support.refund-correct-order --agent mock-default
 agentlab compare <baseline-run-id> <candidate-run-id>
 ```
 
-7. Launch the local UI:
+9. Launch the local UI:
 
 ```bash
 agentlab ui
@@ -124,7 +143,7 @@ agentlab ui
 
 The UI starts on `http://127.0.0.1:4173`.
 
-8. Run a suite and compare two suite batches:
+10. Run a suite and compare two suite batches:
 
 ```bash
 agentlab run --suite support --agent mock-default
@@ -176,13 +195,15 @@ npm run start -- run support.refund-correct-order --agent mock-default
 Supported command surface:
 
 ```text
-agentlab list scenarios
+agentlab run --demo
 agentlab run <scenario-id> [--agent <name>]
 agentlab run --suite <suite-id> [--agent <name>]
 agentlab run --suite-def <name> [--agent <name>]
 agentlab run <scenario-id> [--variant-set <name>]
 agentlab show <run-id>
+agentlab approve <run-id>
 agentlab compare <baseline-run-id> <candidate-run-id>
+agentlab compare --baseline <scenario-id> <candidate-run-id>
 agentlab compare --suite <baseline-batch-id> <candidate-batch-id>
 agentlab ui
 agentlab version
