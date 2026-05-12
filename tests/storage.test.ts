@@ -58,6 +58,22 @@ function makeBundle(id: string, overrides: Partial<RunBundle["run"]> = {}, toolN
   };
 }
 
+function withTempStorage<T>(fn: (storage: Storage) => T): T {
+  const previousCwd = cwd();
+  const root = join(tmpdir(), `arl_storage_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+  mkdirSync(root, { recursive: true });
+  chdir(root);
+
+  const storage = new Storage();
+  try {
+    return fn(storage);
+  } finally {
+    storage.close();
+    chdir(previousCwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 test("compareRuns includes evaluator and tool diffs", () => {
   const storage = new Storage();
   try {
@@ -140,6 +156,71 @@ test("approveRun returns not_found for unknown run id", () => {
   } finally {
     storage.close();
   }
+});
+
+test("resolveRunId resolves @last and @prev globally", () => {
+  withTempStorage((storage) => {
+    storage.upsertAgentVersion(agentVersion);
+    const stamp = Date.now();
+    const first = makeBundle(`run_resolve_first_${stamp}`, {
+      startedAt: "2026-05-12T10:00:00.000Z",
+      finishedAt: "2026-05-12T10:00:01.000Z",
+    });
+    const second = makeBundle(`run_resolve_second_${stamp}`, {
+      startedAt: "2026-05-12T10:01:00.000Z",
+      finishedAt: "2026-05-12T10:01:01.000Z",
+    });
+
+    storage.saveRun(first);
+    storage.saveRun(second);
+
+    assert.equal(storage.resolveRunId("@last"), second.run.id);
+    assert.equal(storage.resolveRunId("@prev"), first.run.id);
+    assert.equal(storage.resolveRunId(first.run.id), first.run.id);
+  });
+});
+
+test("resolveRunId scopes @last and @prev by scenario id", () => {
+  withTempStorage((storage) => {
+    storage.upsertAgentVersion(agentVersion);
+    const stamp = Date.now();
+    const supportFirst = makeBundle(`run_resolve_support_first_${stamp}`, {
+      scenarioId: "support.refund-correct-order",
+      startedAt: "2026-05-12T10:00:00.000Z",
+      finishedAt: "2026-05-12T10:00:01.000Z",
+    });
+    const opsRun = makeBundle(`run_resolve_ops_${stamp}`, {
+      scenarioId: "ops.payments-api-alert",
+      startedAt: "2026-05-12T10:01:00.000Z",
+      finishedAt: "2026-05-12T10:01:01.000Z",
+    });
+    const supportSecond = makeBundle(`run_resolve_support_second_${stamp}`, {
+      scenarioId: "support.refund-correct-order",
+      startedAt: "2026-05-12T10:02:00.000Z",
+      finishedAt: "2026-05-12T10:02:01.000Z",
+    });
+
+    storage.saveRun(supportFirst);
+    storage.saveRun(opsRun);
+    storage.saveRun(supportSecond);
+
+    assert.equal(storage.resolveRunId("@last", { scenarioId: "support.refund-correct-order" }), supportSecond.run.id);
+    assert.equal(storage.resolveRunId("@prev", { scenarioId: "support.refund-correct-order" }), supportFirst.run.id);
+    assert.equal(storage.resolveRunId("@last:ops.payments-api-alert"), opsRun.run.id);
+  });
+});
+
+test("resolveRunId explains empty and insufficient shorthand lookups", () => {
+  withTempStorage((storage) => {
+    assert.throws(() => storage.resolveRunId("@last"), /No runs found yet/);
+
+    storage.upsertAgentVersion(agentVersion);
+    const only = makeBundle(`run_resolve_only_${Date.now()}`);
+    storage.saveRun(only);
+
+    assert.throws(() => storage.resolveRunId("@prev"), /No previous run found/);
+    assert.throws(() => storage.resolveRunId("@nope"), /Unknown run shorthand '@nope'/);
+  });
 });
 
 test("Storage migrates v2 databases to v3 without losing existing runs", () => {
