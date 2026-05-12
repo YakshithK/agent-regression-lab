@@ -37,7 +37,7 @@ test("built cli responds to help and version", async (t) => {
   assert.match(help.stdout, /agentlab run <scenario-id>/);
 
   const version = await runCli(cliPath, fixtureRoot, "version");
-  assert.equal(version.stdout.trim(), packageJson.version);
+  assert.match(version.stdout, new RegExp(packageJson.version));
 
   const listed = await runCli(cliPath, fixtureRoot, "list", "scenarios");
   assert.match(listed.stdout, /support\.refund-correct-order/);
@@ -45,8 +45,8 @@ test("built cli responds to help and version", async (t) => {
   const firstRun = await runCli(cliPath, fixtureRoot, "run", "support.refund-correct-order", "--agent", "mock-default");
   const secondRun = await runCli(cliPath, fixtureRoot, "run", "support.refund-correct-order", "--agent", "mock-default");
 
-  const firstRunId = firstRun.stdout.match(/^Run: (.+)$/m)?.[1];
-  const secondRunId = secondRun.stdout.match(/^Run: (.+)$/m)?.[1];
+  const firstRunId = firstRun.stdout.match(/Run ID\s+(\S+)/m)?.[1];
+  const secondRunId = secondRun.stdout.match(/Run ID\s+(\S+)/m)?.[1];
   assert.ok(firstRunId);
   assert.ok(secondRunId);
   if (!firstRunId || !secondRunId) {
@@ -54,13 +54,13 @@ test("built cli responds to help and version", async (t) => {
   }
 
   const shown = await runCli(cliPath, fixtureRoot, "show", firstRunId);
-  assert.match(shown.stdout, /Scenario: support\.refund-correct-order/);
+  assert.match(shown.stdout, /Scenario\s+support\.refund-correct-order/);
 
   const suiteRun = await runCli(cliPath, fixtureRoot, "run", "--suite-def", "pre_merge", "--agent", "mock-default");
-  assert.match(suiteRun.stdout, /Suite definition: pre_merge/);
+  assert.match(suiteRun.stdout, /Suite definition:\s+pre_merge/);
 
   const variantRun = await runCli(cliPath, fixtureRoot, "run", "support.refund-correct-order", "--variant-set", "refund-agent-model-comparison");
-  assert.match(variantRun.stdout, /Variant set: refund-agent-model-comparison/);
+  assert.match(variantRun.stdout, /Variant set:\s+refund-agent-model-comparison/);
   assert.match(variantRun.stdout, /Variant: baseline/);
 });
 

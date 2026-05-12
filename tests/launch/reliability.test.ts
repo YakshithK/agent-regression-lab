@@ -46,8 +46,7 @@ test("getRunErrorDetail returns conversation HTTP error detail", () => {
 });
 
 test("formatCliErrorMessage rewrites database lock errors with sequential guidance", () => {
-  assert.equal(
-    formatCliErrorMessage("database is locked"),
-    "SQLite database is locked. Retry the run sequentially or wait for the current run to finish.",
-  );
+  const message = formatCliErrorMessage("database is locked");
+  assert.match(message, /SQLite database is locked\. Retry the run sequentially or wait for the current run to finish\./);
+  assert.match(message, /Run: agentlab run <scenario-id>/);
 });

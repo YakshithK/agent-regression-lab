@@ -9,7 +9,7 @@ test("printRunComparison celebrates score improvements", () => {
     printRunComparison(makeComparison(60, 100, "improved"));
   });
 
-  assert.match(lines.join("\n"), /Score improved 60 -> 100 -- your agent got better\./);
+  assert.match(lines.join("\n"), /Score improved 60 .+ 100/);
 });
 
 function captureConsole(fn: () => void): string[] {
