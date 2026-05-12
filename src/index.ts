@@ -869,8 +869,8 @@ export function printRunComparison(comparison: import("./types.js").RunCompariso
     console.log(boxed(`${badge.improved()}  Scores improved\n\n  ${comparison.baseline.run.scenarioId}`, "green"));
   }
 
-  const baseStatus = comparison.baseline.run.status === "pass" ? badge.pass() : badge.fail();
-  const candStatus = comparison.candidate.run.status === "pass" ? badge.pass() : badge.fail();
+  const baseStatus = statusBadge(comparison.baseline.run.status);
+  const candStatus = statusBadge(comparison.candidate.run.status);
   const scoreDelta = comparison.candidate.run.score - comparison.baseline.run.score;
   const deltaStr = scoreDelta > 0 ? style.green(`+${scoreDelta}`) : scoreDelta < 0 ? style.red(`${scoreDelta}`) : style.dim("±0");
 
@@ -903,6 +903,12 @@ export function printRunComparison(comparison: import("./types.js").RunCompariso
     console.log(`  ${style.green("✓")} No regressions detected.`);
   }
   console.log();
+}
+
+function statusBadge(status: import("./types.js").RunStatus): string {
+  if (status === "pass") return badge.pass();
+  if (status === "error") return badge.error();
+  return badge.fail();
 }
 
 function signedMetric(value: number): string {

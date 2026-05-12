@@ -138,7 +138,8 @@ tools:
 `
     : "";
   if (answers.provider === "http") {
-    return `agents:\n  - name: ${answers.agentName}\n    provider: http\n    url: ${answers.baseUrl ?? "http://localhost:3000"}\n    label: ${answers.agentName}\n${supportTool}`;
+    const baseUrl = validateBaseUrlForConfig(answers.baseUrl ?? "http://localhost:3000");
+    return `agents:\n  - name: ${answers.agentName}\n    provider: http\n    url: ${yamlQuote(baseUrl)}\n    label: ${answers.agentName}\n${supportTool}`;
   }
   if (answers.provider === "external_process") {
     const command = answers.harnessLanguage === "python" ? "python harness.py" : "node harness.js";
@@ -148,6 +149,27 @@ tools:
     return `agents:\n  - name: ${answers.agentName}\n    provider: openai\n    model: gpt-4o-mini\n    label: ${answers.agentName}\n${supportTool}`;
   }
   return `agents:\n  - name: ${answers.agentName}\n    provider: mock\n    label: ${answers.agentName}\n${supportTool}`;
+}
+
+function validateBaseUrlForConfig(baseUrl: string): string {
+  const trimmed = baseUrl.trim();
+  if (/[\r\n\0]/.test(trimmed)) {
+    throw new Error("Invalid HTTP base URL. Use a valid absolute URL without control characters.\n\nRun: agentlab init");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("Invalid HTTP base URL. Use a valid absolute URL.\n\nRun: agentlab init");
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Invalid HTTP base URL. Use http:// or https://.\n\nRun: agentlab init");
+  }
+  return trimmed;
+}
+
+function yamlQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
 }
 
 function appendGitignore(targetDir: string): void {

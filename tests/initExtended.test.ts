@@ -119,6 +119,20 @@ describe("initProject extended", () => {
     assert.ok(config.includes("http://localhost:4000"));
   });
 
+  it("rejects invalid HTTP base URL containing control characters", async () => {
+    await assert.rejects(
+      () => initProject("http-project-invalid", {
+        answers: {
+          provider: "http",
+          domain: "support",
+          agentName: "http-agent",
+          baseUrl: "http://localhost:4000\ninjected: true",
+        },
+      }),
+      /Invalid HTTP base URL/,
+    );
+  });
+
   // -------------------------------------------------------------------------
   // OpenAI provider
   // -------------------------------------------------------------------------
