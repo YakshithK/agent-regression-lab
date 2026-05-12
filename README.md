@@ -68,74 +68,55 @@ If you want pre-merge regression checks in CI:
 
 ## First 10 Minutes
 
-The fastest path is to run the CLI from a local checkout.
+The fastest path for new users is the installed CLI.
 
-1. Install dependencies and build:
+### Path A: npm install
+
+```bash
+npm install -g agent-regression-lab
+agentlab run --demo
+agentlab init
+agentlab list scenarios
+agentlab run support.generated-happy-path --agent mock-default
+agentlab approve @last
+```
+
+`agentlab init` writes `agentlab.config.yaml`, starter scenarios under `scenarios/`, fixture stubs under `fixtures/`, and `.gitignore` coverage for `artifacts/`.
+
+Add more starter coverage any time:
+
+```bash
+agentlab generate --domain support --count 5 --agent mock-default
+```
+
+Use shorthands instead of copying UUIDs:
+
+```bash
+agentlab show @last
+agentlab compare @prev @last
+agentlab compare --baseline support.generated-happy-path @last
+```
+
+### Path B: local development
 
 ```bash
 npm install
 npm run check
 npm test
 npm run build
-```
-
-2. Verify the CLI:
-
-```bash
-agentlab --help
-```
-
-If you have not linked the package locally yet, use:
-
-```bash
 npm link
 agentlab --help
 ```
 
-3. Try the zero-config demo (no config or scenarios needed):
+Try the zero-config demo from either path:
 
 ```bash
 agentlab run --demo
 ```
 
-This runs a 2-phase narrative demo: baseline run → simulated prompt change → regression caught. Useful for understanding the workflow without setup.
+This runs a 2-phase narrative demo: baseline run → simulated prompt change → regression caught.
 
-4. List scenarios:
-
-```bash
-agentlab list scenarios
-```
-
-5. Run a deterministic sample scenario:
-
-```bash
-agentlab run support.refund-correct-order --agent mock-default
-```
-
-6. Approve a baseline and compare new runs against it:
-
-```bash
-agentlab approve <run-id>
-agentlab run support.refund-correct-order --agent mock-default
-agentlab compare --baseline support.refund-correct-order <new-run-id>
-```
-
-This is the core workflow: snapshot a known-good run, then verify future changes against it.
-
-7. Inspect the run:
-
-```bash
-agentlab show <run-id>
-```
-
-8. Run the same scenario again, then do a direct comparison:
-
-```bash
-agentlab run support.refund-correct-order --agent mock-default
-agentlab compare <baseline-run-id> <candidate-run-id>
-```
-
-9. Launch the local UI:
+Launch the local UI:
 
 ```bash
 agentlab ui
@@ -195,15 +176,17 @@ npm run start -- run support.refund-correct-order --agent mock-default
 Supported command surface:
 
 ```text
+agentlab init [project-name]
+agentlab generate [--agent <name>] [--domain support|coding|research|ops|general] [--count <n>]
 agentlab run --demo
 agentlab run <scenario-id> [--agent <name>]
 agentlab run --suite <suite-id> [--agent <name>]
 agentlab run --suite-def <name> [--agent <name>]
 agentlab run <scenario-id> [--variant-set <name>]
-agentlab show <run-id>
-agentlab approve <run-id>
-agentlab compare <baseline-run-id> <candidate-run-id>
-agentlab compare --baseline <scenario-id> <candidate-run-id>
+agentlab show <run-id|@last|@prev>
+agentlab approve <run-id|@last|@prev>
+agentlab compare <baseline-run-id|@prev> <candidate-run-id|@last>
+agentlab compare --baseline <scenario-id> <candidate-run-id|@last>
 agentlab compare --suite <baseline-batch-id> <candidate-batch-id>
 agentlab ui
 agentlab version

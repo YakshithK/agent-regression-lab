@@ -1,6 +1,6 @@
 {
   "name": "agent-regression-lab",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": false,
   "description": "Local-first scenario-based evaluation harness for AI agents.",
   "license": "MIT",
@@ -27,15 +27,16 @@
     "bin",
     "dist",
     "dist/ui-assets",
+    "src/templates",
     "README.md",
     "docs",
     "examples"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20.12"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && npm run build:ui",
+    "build": "tsc -p tsconfig.json && node -e \"const fs=require('node:fs'); fs.rmSync('dist/templates',{recursive:true,force:true}); fs.cpSync('src/templates','dist/templates',{recursive:true});\" && npm run build:ui",
     "build:ui": "esbuild src/ui/client.tsx --bundle --format=esm --platform=browser --outdir=dist/ui-assets --loader:.css=css --log-level=warning",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test tests/*.test.ts tests/**/*.test.ts",
@@ -44,11 +45,15 @@
     "run": "tsx src/index.ts"
   },
   "dependencies": {
+    "@inquirer/prompts": "^8.4.3",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "boxen": "^8.0.1",
+    "chalk": "^5.6.2",
     "esbuild": "^0.27.4",
     "openai": "^6.33.0",
+    "ora": "^9.4.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "tsx": "^4.21.0",

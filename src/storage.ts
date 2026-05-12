@@ -481,6 +481,50 @@ export class Storage {
     };
   }
 
+  resolveRunId(id: string, context: { scenarioId?: string } = {}): string {
+    if (!id.startsWith("@")) {
+      return id;
+    }
+
+    const match = id.match(/^@(last|prev)(?::(.+))?$/);
+    if (!match) {
+      throw new Error(`Unknown run shorthand '${id}'. Use @last or @prev.`);
+    }
+
+    const shorthand = match[1] as "last" | "prev";
+    const scenarioId = match[2] ?? context.scenarioId;
+    const offset = shorthand === "last" ? 0 : 1;
+    const rows = scenarioId
+      ? (this.db
+          .prepare(
+            `SELECT id FROM runs
+             WHERE scenario_id = ?
+             ORDER BY started_at DESC, id DESC
+             LIMIT 2`,
+          )
+          .all(scenarioId) as Array<{ id: string }>)
+      : (this.db
+          .prepare(
+            `SELECT id FROM runs
+             ORDER BY started_at DESC, id DESC
+             LIMIT 2`,
+          )
+          .all() as Array<{ id: string }>);
+
+    if (rows.length === 0) {
+      const suffix = scenarioId ? ` for scenario '${scenarioId}'` : "";
+      throw new Error(`No runs found yet${suffix}. Run: agentlab run <scenario-id> --agent <name>`);
+    }
+
+    const row = rows[offset];
+    if (!row) {
+      const suffix = scenarioId ? ` for scenario '${scenarioId}'` : "";
+      throw new Error(`No previous run found${suffix}. Run a scenario first.`);
+    }
+
+    return row.id;
+  }
+
   compareRuns(baselineRunId: string, candidateRunId: string): RunComparison {
     const baseline = this.getRun(baselineRunId);
     const candidate = this.getRun(candidateRunId);

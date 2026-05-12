@@ -29,21 +29,21 @@ describe("init command", () => {
     assert.equal(existsSync(join(tempDir, "my-project", "agentlab.config.yaml")), true);
   });
 
-  it("creates sample scenario file", async () => {
+  it("creates generated support scenario files", async () => {
     await initProject("my-project");
 
-    const scenarioPath = join(tempDir, "my-project", "scenarios", "sample", "hello-world.yaml");
+    const scenarioPath = join(tempDir, "my-project", "scenarios", "support", "generated-happy-path.yaml");
     assert.equal(existsSync(scenarioPath), true);
 
     const content = readFileSync(scenarioPath, "utf-8");
-    assert.ok(content.includes("id: sample.hello-world"));
-    assert.ok(content.includes("suite: sample"));
+    assert.ok(content.includes("id: support.generated-happy-path"));
+    assert.ok(content.includes("suite: support"));
   });
 
-  it("creates sample fixture file", async () => {
+  it("creates fixture stubs for the chosen domain", async () => {
     await initProject("my-project");
 
-    const fixturePath = join(tempDir, "my-project", "fixtures", "users.json");
+    const fixturePath = join(tempDir, "my-project", "fixtures", "support", "customers.json");
     assert.equal(existsSync(fixturePath), true);
   });
 
@@ -55,11 +55,10 @@ describe("init command", () => {
 
     const content = readFileSync(configPath, "utf-8");
     assert.ok(content.includes("mock-default"));
-    assert.ok(content.includes('modulePath: ./tools/customTool.ts'));
-    assert.ok(content.includes('package: "@agentlab/example-support-tools"'));
+    assert.ok(content.includes("provider: mock"));
   });
 
-  it("prints next steps including package-backed tool guidance", async () => {
+  it("prints next steps for the generated starter scenario", async () => {
     const lines: string[] = [];
     const originalLog = console.log;
     console.log = (...args: unknown[]) => {
@@ -73,8 +72,7 @@ describe("init command", () => {
     }
 
     const output = lines.join("\n");
-    assert.match(output, /npm install @agentlab\/example-support-tools/);
-    assert.match(output, /agentlab run sample\.hello-world --agent mock-default/);
+    assert.match(output, /agentlab run support\.generated-happy-path --agent mock-default/);
   });
 
   it("throws if directory already exists", async () => {

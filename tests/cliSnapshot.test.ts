@@ -16,8 +16,8 @@ test("help documents snapshot companion commands", async () => {
   try {
     const result = await runCli(workspace, "--help");
     assert.match(result.stdout, /agentlab run --demo/);
-    assert.match(result.stdout, /agentlab approve <run-id>/);
-    assert.match(result.stdout, /agentlab compare --baseline <scenario-id> <candidate-run-id>/);
+    assert.match(result.stdout, /agentlab approve/);
+    assert.match(result.stdout, /agentlab compare --baseline/);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
@@ -28,13 +28,13 @@ test("run --demo works without config or scenarios from any cwd", async () => {
   try {
     const result = await runCli(workspace, "run", "--demo");
     assert.equal(result.stderr, "");
-    assert.match(result.stdout, /Scenario: demo\.snapshot-companion/);
+    assert.match(result.stdout, /Scenario:\s+demo\.snapshot-companion/);
     assert.match(result.stdout, /Phase 1: establish a baseline/);
-    assert.match(result.stdout, /PASS\s+Score: 100\/100/);
-    assert.match(result.stdout, /Approved as baseline/);
-    assert.match(result.stdout, /Simulating a prompt change/);
-    assert.match(result.stdout, /FAIL\s+Score: 50\/100\s+-- regression detected/);
-    assert.match(result.stdout, /What changed:/);
+    assert.match(result.stdout, /PASS\s+100\/100/);
+    assert.match(result.stdout, /APPROVED|Set as baseline/);
+    assert.match(result.stdout, /Phase 2|Simulating a prompt change/);
+    assert.match(result.stdout, /FAIL\s+REGRESSION\s+50\/100/);
+    assert.match(result.stdout, /What changed/);
     assert.match(result.stdout, /mentions-date\s+was: PASS\s+now: FAIL/);
     assert.match(result.stdout, /uses-two-tools\s+unchanged/);
     assert.match(result.stdout, /This is what agent regression testing catches/);
@@ -65,21 +65,22 @@ test("approve and compare --baseline run the snapshot workflow", async () => {
 
     const first = await runCli(workspace, "run", "support.refund-correct-order");
     const second = await runCli(workspace, "run", "support.refund-correct-order");
-    const firstRunId = first.stdout.match(/^Run: (.+)$/m)?.[1];
-    const secondRunId = second.stdout.match(/^Run: (.+)$/m)?.[1];
+    const firstRunId = first.stdout.match(/Run ID\s+(\S+)/m)?.[1];
+    const secondRunId = second.stdout.match(/Run ID\s+(\S+)/m)?.[1];
     assert.ok(firstRunId);
     assert.ok(secondRunId);
 
     const approved = await runCli(workspace, "approve", firstRunId!);
-    assert.match(approved.stdout, /Approved baseline for scenario support\.refund-correct-order/);
+    assert.match(approved.stdout, /APPROVED.*Baseline set|Baseline set.*APPROVED/s);
+    assert.match(approved.stdout, /support\.refund-correct-order/);
 
     const approvedAgain = await runCli(workspace, "approve", firstRunId!);
-    assert.match(approvedAgain.stdout, /Already the baseline for scenario support\.refund-correct-order/);
+    assert.match(approvedAgain.stdout, /APPROVED.*Already the baseline|Already the baseline/s);
+    assert.match(approvedAgain.stdout, /support\.refund-correct-order/);
 
     const compared = await runCli(workspace, "compare", "--baseline", "support.refund-correct-order", secondRunId!);
-    assert.match(compared.stdout, new RegExp(`Baseline: ${escapeRegExp(firstRunId!)}`));
-    assert.match(compared.stdout, new RegExp(`Candidate: ${escapeRegExp(secondRunId!)}`));
-    assert.match(compared.stdout, /Classification:/);
+    assert.match(compared.stdout, new RegExp(`Baseline\\s+.*${escapeRegExp(firstRunId!)}`));
+    assert.match(compared.stdout, new RegExp(`Candidate\\s+.*${escapeRegExp(secondRunId!)}`));
     assert.match(compared.stdout, /No regressions detected\./);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
@@ -95,7 +96,7 @@ test("compare --baseline reports when no approved baseline exists", async () => 
     writeSnapshotConfig(workspace);
 
     const run = await runCli(workspace, "run", "support.refund-correct-order");
-    const runId = run.stdout.match(/^Run: (.+)$/m)?.[1];
+    const runId = run.stdout.match(/Run ID\s+(\S+)/m)?.[1];
     assert.ok(runId);
 
     await assert.rejects(
@@ -103,7 +104,7 @@ test("compare --baseline reports when no approved baseline exists", async () => 
       (error: unknown) =>
         error instanceof Error &&
         /No baseline found for scenario support\.refund-correct-order with agent mock-support-agent-v1/.test(error.message) &&
-        /agentlab approve <run-id>/.test(error.message),
+        /agentlab approve @last/.test(error.message),
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });

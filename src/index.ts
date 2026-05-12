@@ -6,16 +6,10 @@ import { basename } from "node:path";
 import { createAgentFactory } from "./agent/factory.js";
 import { getAgentRegistration, getVariantSet } from "./config.js";
 import { createConfigHash, createSuiteBatchId } from "./lib/id.js";
+import { badge, boxed, divider, gradient, scoreBar, sectionHeader, style, withSpinner } from "./cliStyle.js";
 import { formatCliErrorMessage, formatRunIdentityLines, getFailedEvaluatorSummaries, getRunErrorDetail } from "./runOutput.js";
 import { initProject } from "./init.js";
 import type { AgentRuntimeConfig, RunBundle, VariantDefinition } from "./types.js";
-
-const colorEnabled = (): boolean => Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
-const color = (code: number) => (text: string): string => (colorEnabled() ? `\x1b[${code}m${text}\x1b[0m` : text);
-const green = color(32);
-const red = color(31);
-const yellow = color(33);
-const dim = color(2);
 
 function suppressNodeSqliteExperimentalWarning(): void {
   const originalEmitWarning = process.emitWarning.bind(process) as (warning: string | Error, ...args: unknown[]) => void;
@@ -74,32 +68,42 @@ export async function main(): Promise<void> {
     case "init":
       await handleInit(args);
       break;
+    case "generate":
+      await handleGenerate(args);
+      break;
     default:
       printUsage();
   }
 }
 
 function printUsage(): void {
-  console.log(`Usage:
-  agentlab init <project-name>
-  agentlab list scenarios
-  agentlab run <scenario-id> [--agent <name>] [--provider mock|openai|external_process|http] [--model <model>] [--agent-label <label>]
-  agentlab run --suite <suite-id> [--agent <name>] [--provider mock|openai|external_process|http] [--model <model>] [--agent-label <label>]
-  agentlab run --suite-def <name> [--agent <name>]
-  agentlab run <scenario-id> [--variant-set <name>]
-  agentlab run --demo
-  agentlab show <run-id>
-  agentlab approve <run-id>
-  agentlab compare <baseline-run-id> <candidate-run-id>
-  agentlab compare --baseline <scenario-id> <candidate-run-id>
-  agentlab compare --suite <baseline-batch-id> <candidate-batch-id>
-  agentlab ui
-  agentlab help
-  agentlab version`);
+  const cmd = (text: string) => style.cyan(text);
+  const arg = (text: string) => style.yellow(text);
+  const dim = style.dim;
+  console.log(`
+  ${gradient("Agent Regression Lab", "#6366f1", "#a855f7")}  ${style.muted("— catch AI regressions before they ship")}
+
+  ${style.bold("Commands")}
+
+  ${cmd("agentlab init")} ${arg("[project-name]")}
+  ${cmd("agentlab generate")} ${arg("[--agent <name>] [--domain support|coding|research|ops|general] [--count <n>]")}
+  ${cmd("agentlab list scenarios")}
+  ${cmd("agentlab run")} ${arg("<scenario-id>")} ${dim("[--agent <name>] [--provider mock|openai|external_process|http]")}
+  ${cmd("agentlab run")} ${arg("--suite <suite-id>")} ${dim("[--agent <name>]")}
+  ${cmd("agentlab run")} ${arg("--suite-def <name>")} ${dim("[--agent <name>]")}
+  ${cmd("agentlab run")} ${arg("--demo")}
+  ${cmd("agentlab show")} ${arg("<run-id|@last|@prev>")}
+  ${cmd("agentlab approve")} ${arg("<run-id|@last>")}
+  ${cmd("agentlab compare")} ${arg("<baseline-id> <candidate-id>")}
+  ${cmd("agentlab compare --baseline")} ${arg("<scenario-id> <candidate-id>")}
+  ${cmd("agentlab compare --suite")} ${arg("<baseline-batch-id> <candidate-batch-id>")}
+  ${cmd("agentlab ui")}
+  ${cmd("agentlab version")}
+`);
 }
 
 function printVersion(): void {
-  console.log(packageJson.version);
+  console.log(`${gradient("agentlab", "#6366f1", "#a855f7")} ${style.muted(`v${packageJson.version}`)}`);
 }
 
 async function handleList(args: string[]): Promise<void> {
@@ -109,19 +113,26 @@ async function handleList(args: string[]): Promise<void> {
   }
 
   const { listScenarios } = await import("./scenarios.js");
-  for (const scenario of listScenarios()) {
-    console.log(`${scenario.id}\t${scenario.suite}\t${scenario.difficulty ?? "-"}\t${scenario.description ?? ""}`);
+  const scenarios = listScenarios();
+  console.log();
+  console.log(sectionHeader(`${scenarios.length} scenario${scenarios.length !== 1 ? "s" : ""}`));
+  for (const scenario of scenarios) {
+    const diff = scenario.difficulty ?? "-";
+    const diffPadded = diff.padEnd(6);
+    const diffColor = diff === "easy" ? style.green(diffPadded) : diff === "hard" ? style.red(diffPadded) : style.yellow(diffPadded);
+    console.log(`  ${style.cyan(scenario.id.padEnd(42))} ${style.muted(scenario.suite.padEnd(18))} ${diffColor}  ${style.dim(scenario.description ?? "")}`);
   }
+  console.log();
 }
 
 async function handleInit(args: string[]): Promise<void> {
   const projectName = args[0];
-  if (!projectName) {
-    console.error("Error: project-name is required.");
-    console.error("Usage: agentlab init <project-name>");
-    process.exit(1);
-  }
-  await initProject(projectName);
+  await initProject(projectName, { interactive: true });
+}
+
+async function handleGenerate(args: string[]): Promise<void> {
+  const { handleGenerate: generate } = await import("./generate.js");
+  await generate(args);
 }
 
 async function handleRun(args: string[]): Promise<void> {
@@ -151,7 +162,7 @@ async function handleRun(args: string[]): Promise<void> {
     const suiteBatchId = createSuiteBatchId();
     const runs: RunBundle[] = [];
     if (parsed.variantSetName) {
-      console.log(`Variant set: ${parsed.variantSetName}`);
+      console.log(`  ${style.muted("Variant set:")} ${style.cyan(parsed.variantSetName!)}`);
       for (const scenario of scenarios) {
         runs.push(...await executeVariantSetScenario(scenario.definition.id, parsed.variantSetName, suiteBatchId));
       }
@@ -174,9 +185,9 @@ async function handleRun(args: string[]): Promise<void> {
 
     const suiteBatchId = createSuiteBatchId();
     const runs: RunBundle[] = [];
-    console.log(`Suite definition: ${suiteDefinition}`);
+    console.log(`  ${style.muted("Suite definition:")} ${style.cyan(suiteDefinition)}`);
     if (parsed.variantSetName) {
-      console.log(`Variant set: ${parsed.variantSetName}`);
+      console.log(`  ${style.muted("Variant set:")} ${style.cyan(parsed.variantSetName!)}`);
       for (const scenario of scenarios) {
         runs.push(...await executeVariantSetScenario(scenario.definition.id, parsed.variantSetName, suiteBatchId, suiteDefinition));
       }
@@ -275,8 +286,9 @@ async function executeDemo(): Promise<RunBundle> {
     storage.upsertAgentVersion(agentVersion);
 
     printDemoIntro();
-    console.log("Phase 1: establish a baseline");
-    const baseline = await withSpinner("Running demo scenario (pass)...", () =>
+    console.log(`  ${style.bold("Phase 1:")} ${style.muted("establish a baseline")}`);
+    console.log();
+    const baseline = await withSpinner("Running baseline scenario...", () =>
       runScenario({
         agentAdapter: factory.createAdapter(),
         agentVersion,
@@ -291,11 +303,12 @@ async function executeDemo(): Promise<RunBundle> {
     storage.approveRun(baseline.run.id);
     printDemoRunReplay(baseline);
     printDemoVerdict(baseline);
-    console.log("Approved as baseline.");
-    console.log("");
+    console.log(`  ${badge.approved()}  Set as baseline.`);
+    console.log();
 
-    console.log("Simulating a prompt change...");
-    const candidate = await withSpinner("Running demo scenario (degraded mode)...", () =>
+    console.log(`  ${style.bold("Phase 2:")} ${style.muted("simulate a prompt change")}`);
+    console.log();
+    const candidate = await withSpinner("Running degraded scenario...", () =>
       runScenario({
         agentAdapter: factory.createAdapter(),
         agentVersion,
@@ -318,38 +331,35 @@ async function executeDemo(): Promise<RunBundle> {
 }
 
 function printDemoIntro(): void {
-  console.log("Scenario: demo.snapshot-companion");
-  console.log('Task: "Use the bundled demo notes to answer today\'s date."');
-  console.log("");
+  console.log(sectionHeader("Demo Run"));
+  console.log(`  ${style.muted("Scenario:")} demo.snapshot-companion`);
+  console.log(`  ${style.muted("Task:")}     "Use the bundled demo notes to answer today's date."`);
+  console.log();
 }
 
 function printDemoRunReplay(bundle: RunBundle): void {
-  console.log(line());
-  console.log("Trace");
+  console.log(divider("Trace"));
   const toolCalls = [...bundle.toolCalls].sort((left, right) => left.stepIndex - right.stepIndex);
   toolCalls.forEach((call, index) => {
-    console.log(`  Step ${index + 1}  ${call.toolName}(${formatInlineObject(call.input)})`);
-    console.log(`          -> ${formatInlineObject(call.output)}`);
+    console.log(`  ${style.muted(`Step ${index + 1}`)}  ${style.cyan(call.toolName)}(${style.dim(formatInlineObject(call.input))})`);
+    console.log(`          ${style.dim("->")} ${style.yellow(formatInlineObject(call.output))}`);
   });
-  console.log(`  Answer  "${bundle.run.finalOutput}"`);
-  console.log(line());
+  console.log(`  ${style.bold("Answer")}  ${style.green(`"${bundle.run.finalOutput}"`)}`);
+  console.log(divider());
 }
 
 function printDemoVerdict(bundle: RunBundle, options: { regression?: boolean } = {}): void {
-  const status = bundle.run.status === "pass" ? green("PASS") : red("FAIL");
-  if (options.regression && bundle.run.status !== "pass") {
-    console.log(`${status}  Score: ${bundle.run.score}/100 -- regression detected  (${bundle.run.totalToolCalls} tool calls, ${bundle.run.durationMs}ms)`);
-    return;
-  }
-  console.log(`${status}  Score: ${bundle.run.score}/100  (${bundle.run.totalToolCalls} tool calls, ${bundle.run.durationMs}ms)`);
-  if (bundle.run.status === "pass") {
-    console.log("The agent found the answer using 2 tool calls -- within budget.");
+  const statusBadge = bundle.run.status === "pass" ? badge.pass() : badge.fail();
+  const regressionNote = options.regression && bundle.run.status !== "pass" ? `  ${badge.regression()}` : "";
+  console.log(`  ${statusBadge}${regressionNote}  ${scoreBar(bundle.run.score)}  ${style.muted(`${bundle.run.totalToolCalls} tool calls · ${bundle.run.durationMs}ms`)}`);
+  if (bundle.run.status === "pass" && !options.regression) {
+    console.log(`  ${style.green("✓")} Agent found the answer within budget.`);
   }
 }
 
 function printDemoComparison(comparison: import("./types.js").RunComparison): void {
-  console.log("");
-  console.log("What changed:");
+  console.log();
+  console.log(sectionHeader("What changed"));
   const evaluatorIds = new Set([
     ...comparison.baseline.evaluatorResults.map((result) => result.evaluatorId),
     ...comparison.candidate.evaluatorResults.map((result) => result.evaluatorId),
@@ -358,24 +368,21 @@ function printDemoComparison(comparison: import("./types.js").RunComparison): vo
     const baseline = comparison.baseline.evaluatorResults.find((result) => result.evaluatorId === evaluatorId);
     const candidate = comparison.candidate.evaluatorResults.find((result) => result.evaluatorId === evaluatorId);
     if (baseline?.status === candidate?.status) {
-      console.log(`  ${green("OK")}  ${evaluatorId}   unchanged`);
+      console.log(`    ${style.green("✓")} ${style.muted(evaluatorId)}  ${style.dim("unchanged")}`);
     } else {
-      console.log(`  ${red("FAIL")}  ${evaluatorId}   was: ${baseline?.status.toUpperCase() ?? "MISSING"}   now: ${candidate?.status.toUpperCase() ?? "MISSING"}`);
+      console.log(`    ${style.red("✗")} ${style.bold(evaluatorId)}  ${style.muted(`was: ${baseline?.status.toUpperCase() ?? "MISSING"}`)}  ${style.red(`now: ${candidate?.status.toUpperCase() ?? "MISSING"}`)}`);
     }
   }
-  console.log("");
-  console.log("This is what agent regression testing catches.");
+  console.log();
+  console.log(`  ${style.bold(gradient("This is what agent regression testing catches.", "#6366f1", "#a855f7"))}`);
 }
 
 function printDemoCta(): void {
-  console.log(line());
-  console.log("Ready to test your own agent?");
-  console.log("  agentlab init        bootstrap a new project");
-  console.log("  agentlab run --help  see all options");
-}
-
-function line(): string {
-  return dim("--------------------------------------------------");
+  console.log(divider());
+  console.log(boxed(
+    `Ready to test your own agent?\n\n  ${style.cyan("agentlab init")}        bootstrap a new project\n  ${style.cyan("agentlab run --help")}  see all options`,
+    "purple",
+  ));
 }
 
 function formatInlineObject(value: unknown): string {
@@ -383,27 +390,6 @@ function formatInlineObject(value: unknown): string {
     return "undefined";
   }
   return JSON.stringify(value);
-}
-
-async function withSpinner<T>(message: string, fn: () => Promise<T>): Promise<T> {
-  if (!process.stdout.isTTY) {
-    return await fn();
-  }
-
-  const frames = ["-", "\\", "|", "/"];
-  let index = 0;
-  process.stdout.write(`  ${frames[index]}  ${message}`);
-  const interval = setInterval(() => {
-    index = (index + 1) % frames.length;
-    process.stdout.write(`\r  ${frames[index]}  ${message}`);
-  }, 80);
-
-  try {
-    return await fn();
-  } finally {
-    clearInterval(interval);
-    process.stdout.write(`\r${" ".repeat(message.length + 6)}\r`);
-  }
 }
 
 async function executeOne(scenarioId: string, runtimeConfig: AgentRuntimeConfig, suiteBatchId?: string): Promise<RunBundle> {
@@ -579,19 +565,32 @@ function printSuiteSummary(suite: string, runs: RunBundle[], suiteBatchId: strin
   const failed = runs.filter((bundle) => bundle.run.status === "fail").length;
   const errored = runs.filter((bundle) => bundle.run.status === "error").length;
   const avgScore = Math.round(runs.reduce((sum, bundle) => sum + bundle.run.score, 0) / runs.length);
-  console.log(`Suite: ${suite}`);
-  console.log(`Passed: ${passed}/${runs.length}`);
-  console.log(`Failed: ${failed}/${runs.length}`);
-  console.log(`Errored: ${errored}/${runs.length}`);
-  console.log(`Average score: ${avgScore}`);
-  console.log(`Suite batch: ${suiteBatchId}`);
+  const hasIssues = failed > 0 || errored > 0;
+  console.log();
+  if (hasIssues) {
+    console.log(boxed(
+      `${badge.regression()}  ${failed + errored} regression${failed + errored !== 1 ? "s" : ""} in ${suite}\n\n  ${passed}/${runs.length} passed · avg score ${avgScore}/100`,
+      "red",
+    ));
+  } else {
+    console.log(boxed(
+      `${badge.pass()}  All scenarios passed in ${suite}\n\n  ${passed}/${runs.length} passed · avg score ${avgScore}/100`,
+      "green",
+    ));
+  }
+  console.log(`  ${style.muted("Suite")}   ${style.cyan(suite)}`);
+  console.log(`  ${style.muted("Batch")}   ${style.dim(suiteBatchId)}`);
+  console.log();
 }
 
 function printConversationSummary(bundle: RunBundle, agentUrl: string, totalSteps: number): void {
-  const statusLabel = bundle.run.status.toUpperCase();
-  console.log(`run ${bundle.run.scenarioId} — ${statusLabel}`);
-  console.log(`  agent: ${bundle.agentVersion?.label ?? bundle.run.agentVersionId} (${agentUrl})`);
-  console.log(`  turns completed: ${bundle.run.totalSteps}/${totalSteps}`);
+  const statusBadge = bundle.run.status === "pass" ? badge.pass() : badge.fail();
+  console.log();
+  console.log(`  ${statusBadge}  ${style.bold(bundle.run.scenarioId)}`);
+  console.log();
+  console.log(`  ${style.muted("Agent")}    ${bundle.agentVersion?.label ?? bundle.run.agentVersionId}  ${style.dim(`(${agentUrl})`)}`);
+  console.log(`  ${style.muted("Turns")}    ${bundle.run.totalSteps}/${totalSteps} completed`);
+  console.log(`  ${style.muted("Run ID")}   ${style.dim(bundle.run.id)}`);
 
   const stepEvals = bundle.evaluatorResults.filter((r) => r.evaluatorId.startsWith("step_"));
   const stepIndices = new Set(
@@ -601,24 +600,30 @@ function printConversationSummary(bundle: RunBundle, agentUrl: string, totalStep
     }),
   );
 
-  for (const stepIndex of [...stepIndices].sort((a, b) => a - b)) {
-    const resultsForStep = stepEvals.filter((r) => r.evaluatorId.startsWith(`step_${stepIndex}_`));
-    const allPass = resultsForStep.every((r) => r.status === "pass");
-    const stepStatus = allPass ? "pass" : "FAIL";
-    const details = resultsForStep.map((r) => {
-      if (r.evaluatorType === "response_latency_max") {
-        const latencyMatch = r.message.match(/(\d+)ms/);
-        return latencyMatch ? `latency ${latencyMatch[1]}ms ✓` : r.message;
-      }
-      return `${r.evaluatorType} ${r.status === "pass" ? "✓" : "✗"}`;
-    });
-    console.log(`  step ${stepIndex + 1}: ${stepStatus}${details.length > 0 ? ` (${details.join(", ")})` : ""}`);
+  if (stepIndices.size > 0) {
+    console.log();
+    console.log(sectionHeader("Steps"));
+    for (const stepIndex of [...stepIndices].sort((a, b) => a - b)) {
+      const resultsForStep = stepEvals.filter((r) => r.evaluatorId.startsWith(`step_${stepIndex}_`));
+      const allPass = resultsForStep.every((r) => r.status === "pass");
+      const icon = allPass ? style.green("✓") : style.red("✗");
+      const details = resultsForStep.map((r) => {
+        if (r.evaluatorType === "response_latency_max") {
+          const latencyMatch = r.message.match(/(\d+)ms/);
+          return latencyMatch ? style.muted(`latency ${latencyMatch[1]}ms`) : r.message;
+        }
+        return `${r.evaluatorType} ${r.status === "pass" ? style.green("✓") : style.red("✗")}`;
+      });
+      const detailStr = details.length > 0 ? `  ${style.dim(`(${details.join(", ")})`)}` : "";
+      console.log(`    ${icon} ${style.muted(`step ${stepIndex + 1}`)}${detailStr}`);
+    }
   }
 
   if (bundle.run.status !== "pass") {
-    console.log(`  run stopped (${bundle.run.terminationReason})`);
+    console.log();
+    console.log(`  ${style.muted("Stopped:")} ${bundle.run.terminationReason}`);
   }
-  console.log(`  run id: ${bundle.run.id}`);
+  console.log();
 }
 
 async function handleUi(): Promise<void> {
@@ -627,78 +632,96 @@ async function handleUi(): Promise<void> {
 }
 
 function printRunSummary(bundle: RunBundle): void {
-  console.log(`Run: ${bundle.run.id}`);
-  console.log(`Scenario: ${bundle.run.scenarioId}`);
-  console.log(`Status: ${bundle.run.status.toUpperCase()}`);
-  console.log(`Score: ${bundle.run.score}/100`);
-  console.log(`Agent: ${bundle.agentVersion?.label ?? bundle.run.agentVersionId}`);
+  const statusBadge = bundle.run.status === "pass" ? badge.pass() : bundle.run.status === "fail" ? badge.fail() : badge.error();
+  console.log();
+  console.log(`  ${statusBadge}  ${scoreBar(bundle.run.score)}  ${style.muted(`${bundle.run.durationMs}ms`)}`);
+  console.log();
+  console.log(`  ${style.muted("Scenario")}   ${style.bold(bundle.run.scenarioId)}`);
+  console.log(`  ${style.muted("Agent")}      ${bundle.agentVersion?.label ?? bundle.run.agentVersionId}`);
   if (bundle.agentVersion?.provider) {
-    console.log(`Provider: ${bundle.agentVersion.provider}`);
+    console.log(`  ${style.muted("Provider")}   ${bundle.agentVersion.provider}`);
   }
   if (bundle.agentVersion?.modelId) {
-    console.log(`Model: ${bundle.agentVersion.modelId}`);
+    console.log(`  ${style.muted("Model")}      ${bundle.agentVersion.modelId}`);
   }
   if (bundle.agentVersion?.command) {
-    console.log(`Command: ${bundle.agentVersion.command} ${(bundle.agentVersion.args ?? []).join(" ")}`.trim());
+    console.log(`  ${style.muted("Command")}    ${bundle.agentVersion.command} ${(bundle.agentVersion.args ?? []).join(" ")}`.trim());
   }
-  for (const line of formatRunIdentityLines(bundle)) {
-    console.log(line);
+  for (const identityLine of formatRunIdentityLines(bundle)) {
+    console.log(`  ${identityLine}`);
   }
-  console.log(`Runtime: ${bundle.run.durationMs}ms`);
+  console.log(`  ${style.muted("Run ID")}     ${style.dim(bundle.run.id)}`);
   if (bundle.run.status === "pass") {
-    console.log("No regressions yet -- approve this run to set a baseline.");
+    console.log();
+    console.log(`  ${style.green("✓")} No regressions detected.  ${style.muted("Run")} ${style.cyan(`agentlab approve ${bundle.run.id}`)} ${style.muted("to set as baseline.")}`);
   }
   if (bundle.run.status !== "pass") {
-    console.log(`Reason: ${bundle.run.terminationReason}`);
+    console.log();
+    console.log(`  ${style.muted("Reason")}  ${bundle.run.terminationReason}`);
     const errorDetail = getRunErrorDetail(bundle);
     if (errorDetail) {
-      console.log(`Error: ${errorDetail}`);
+      console.log(`  ${style.muted("Error")}   ${style.red(errorDetail)}`);
     }
     const failedEvaluators = getFailedEvaluatorSummaries(bundle);
     if (failedEvaluators.length > 0) {
-      console.log("Failed evaluators:");
+      console.log();
+      console.log(`  ${style.bold("Failed evaluators")}`);
       for (const summary of failedEvaluators) {
-        console.log(`- ${summary}`);
+        console.log(`    ${style.red("✗")} ${summary}`);
       }
     }
   }
+  console.log();
 }
 
 async function handleShow(args: string[]): Promise<void> {
-  const runId = args[0];
-  if (!runId) {
+  const runIdArg = args[0];
+  if (!runIdArg) {
     throw new Error("Missing run id.");
   }
 
   const { Storage } = await import("./storage.js");
   const storage = new Storage();
   try {
+    const runId = storage.resolveRunId(runIdArg);
     const bundle = storage.getRun(runId);
     if (!bundle) {
       throw new Error(`Run '${runId}' not found.`);
     }
 
-    console.log(`Run: ${bundle.run.id}`);
-    console.log(`Scenario: ${bundle.run.scenarioId}`);
-    console.log(`Status: ${bundle.run.status.toUpperCase()}`);
-    console.log(`Score: ${bundle.run.score}/100`);
+    const statusBadge = bundle.run.status === "pass" ? badge.pass() : bundle.run.status === "fail" ? badge.fail() : badge.error();
+    console.log();
+    console.log(`  ${statusBadge}  ${scoreBar(bundle.run.score)}  ${style.muted(`${bundle.run.durationMs}ms`)}`);
+    console.log();
+    console.log(`  ${style.muted("Scenario")}     ${style.bold(bundle.run.scenarioId)}`);
+    console.log(`  ${style.muted("Run ID")}       ${style.dim(bundle.run.id)}`);
+    console.log(`  ${style.muted("Termination")}  ${bundle.run.terminationReason}`);
     if (bundle.agentVersion) {
-      console.log(`Provider: ${bundle.agentVersion.provider ?? "unknown"}`);
-      console.log(`Model: ${bundle.agentVersion.modelId ?? "unknown"}`);
+      console.log(`  ${style.muted("Provider")}     ${bundle.agentVersion.provider ?? "unknown"}`);
+      if (bundle.agentVersion.modelId) {
+        console.log(`  ${style.muted("Model")}        ${bundle.agentVersion.modelId}`);
+      }
       if (bundle.agentVersion.command) {
-        console.log(`Command: ${bundle.agentVersion.command} ${(bundle.agentVersion.args ?? []).join(" ")}`.trim());
+        console.log(`  ${style.muted("Command")}      ${bundle.agentVersion.command} ${(bundle.agentVersion.args ?? []).join(" ")}`.trim());
       }
     }
-    console.log(`Termination: ${bundle.run.terminationReason}`);
     const errorDetail = getRunErrorDetail(bundle);
     if (errorDetail) {
-      console.log(`Error: ${errorDetail}`);
+      console.log(`  ${style.muted("Error")}        ${style.red(errorDetail)}`);
     }
-    console.log(`Final output: ${bundle.run.finalOutput}`);
-    console.log("Evaluators:");
-    for (const result of bundle.evaluatorResults) {
-      console.log(`- ${result.evaluatorId}: ${result.status.toUpperCase()} - ${result.message}`);
+    console.log();
+    console.log(`  ${style.bold("Final output")}`);
+    console.log(`  ${style.dim(bundle.run.finalOutput ?? "(none)")}`);
+    if (bundle.evaluatorResults.length > 0) {
+      console.log();
+      console.log(sectionHeader("Evaluators"));
+      for (const result of bundle.evaluatorResults) {
+        const icon = result.status === "pass" ? style.green("✓") : style.red("✗");
+        const statusLabel = result.status === "pass" ? style.green("pass") : style.red("fail");
+        console.log(`    ${icon} ${style.cyan(result.evaluatorId)}  ${statusLabel}  ${style.dim(result.message)}`);
+      }
     }
+    console.log();
   } finally {
     storage.close();
   }
@@ -718,49 +741,63 @@ async function handleCompare(args: string[]): Promise<void> {
       }
 
       const comparison = storage.compareSuites(baselineBatchId, candidateBatchId);
-      console.log(`Suite: ${comparison.suite}`);
-      console.log(`Baseline batch: ${comparison.baselineBatchId}`);
-      console.log(`Candidate batch: ${comparison.candidateBatchId}`);
-      console.log(`Classification: ${comparison.classification.toUpperCase()}`);
-      console.log(`Pass delta: ${signedMetric(comparison.deltas.pass)}`);
-      console.log(`Fail delta: ${signedMetric(comparison.deltas.fail)}`);
-      console.log(`Error delta: ${signedMetric(comparison.deltas.error)}`);
-      console.log(`Average score delta: ${signedMetric(comparison.deltas.averageScore)}`);
-      console.log(`Average runtime delta: ${signedMetric(comparison.deltas.averageRuntimeMs)}ms`);
-      console.log(`Average steps delta: ${signedMetric(comparison.deltas.averageSteps)}`);
+      const hasRegressions = comparison.regressions.length > 0;
+      const hasImprovements = comparison.improvements.length > 0;
+      const classBadge = hasRegressions ? badge.regression() : hasImprovements ? badge.improved() : badge.pass();
+      console.log();
+      console.log(`  ${classBadge}  ${style.bold(comparison.suite)}`);
+      console.log();
+      console.log(`  ${style.muted("Baseline batch")}   ${style.dim(comparison.baselineBatchId)}`);
+      console.log(`  ${style.muted("Candidate batch")}  ${style.dim(comparison.candidateBatchId)}`);
+      console.log();
+      console.log(sectionHeader("Deltas"));
+      const delta = (label: string, val: number, unit = "") => {
+        const v = signedMetric(val);
+        const colored = val > 0 ? style.green(v) : val < 0 ? style.red(v) : style.dim(v);
+        console.log(`    ${style.muted(label.padEnd(18))} ${colored}${unit}`);
+      };
+      delta("Pass", comparison.deltas.pass);
+      delta("Fail", comparison.deltas.fail);
+      delta("Error", comparison.deltas.error);
+      delta("Avg score", comparison.deltas.averageScore);
+      delta("Avg runtime", comparison.deltas.averageRuntimeMs, "ms");
+      delta("Avg steps", comparison.deltas.averageSteps);
       if (comparison.notes.length > 0) {
-        console.log("Notes:");
+        console.log(sectionHeader("Notes"));
         for (const note of comparison.notes) {
-          console.log(`- ${note}`);
+          console.log(`    ${style.muted("·")} ${note}`);
         }
       }
       if (comparison.regressions.length > 0) {
-        console.log("Regressions:");
+        console.log(sectionHeader(`Regressions (${comparison.regressions.length})`));
         for (const regression of comparison.regressions) {
-          console.log(`- ${regression.scenarioId}: ${regression.comparison.classification}`);
+          console.log(`    ${style.red("✗")} ${style.bold(regression.scenarioId)}  ${style.muted(regression.comparison.classification)}`);
         }
       }
       if (comparison.improvements.length > 0) {
-        console.log("Improvements:");
+        console.log(sectionHeader(`Improvements (${comparison.improvements.length})`));
         for (const improvement of comparison.improvements) {
-          console.log(`- ${improvement.scenarioId}: ${improvement.comparison.classification}`);
+          console.log(`    ${style.green("↑")} ${style.bold(improvement.scenarioId)}  ${style.muted(improvement.comparison.classification)}`);
         }
       }
       if (comparison.missingFromCandidate.length > 0) {
-        console.log(`Missing from candidate: ${comparison.missingFromCandidate.join(", ")}`);
+        console.log();
+        console.log(`  ${style.yellow("Missing from candidate:")} ${comparison.missingFromCandidate.join(", ")}`);
       }
       if (comparison.missingFromBaseline.length > 0) {
-        console.log(`Missing from baseline: ${comparison.missingFromBaseline.join(", ")}`);
+        console.log(`  ${style.yellow("Missing from baseline:")} ${comparison.missingFromBaseline.join(", ")}`);
       }
+      console.log();
       return;
     }
 
     if (isBaselineCompare) {
       const scenarioId = args[1];
-      const candidateRunId = args[2];
-      if (!scenarioId || !candidateRunId) {
+      const candidateRunIdArg = args[2];
+      if (!scenarioId || !candidateRunIdArg) {
         throw new Error("Missing scenario id or candidate run id.");
       }
+      const candidateRunId = storage.resolveRunId(candidateRunIdArg, { scenarioId });
 
       const candidate = storage.getRun(candidateRunId);
       if (!candidate) {
@@ -769,7 +806,7 @@ async function handleCompare(args: string[]): Promise<void> {
       const baseline = storage.getBaselineRun(scenarioId, candidate.run.agentVersionId);
       if (!baseline) {
         const agentLabel = candidate.agentVersion?.label ?? candidate.run.agentVersionId;
-        throw new Error(`No baseline found for scenario ${scenarioId} with agent ${agentLabel}. Run \`agentlab approve <run-id>\` first.`);
+        throw new Error(`No baseline found for scenario ${scenarioId} with agent ${agentLabel}.\n\nRun: agentlab approve @last`);
       }
 
       printRunComparison(storage.compareRuns(baseline.run.id, candidate.run.id));
@@ -781,69 +818,97 @@ async function handleCompare(args: string[]): Promise<void> {
       throw new Error("Missing baseline or candidate run id.");
     }
 
-    printRunComparison(storage.compareRuns(baselineRunId, candidateRunId));
+    printRunComparison(storage.compareRuns(storage.resolveRunId(baselineRunId), storage.resolveRunId(candidateRunId)));
   } finally {
     storage.close();
   }
 }
 
 async function handleApprove(args: string[]): Promise<void> {
-  const runId = args[0];
-  if (!runId) {
+  const runIdArg = args[0];
+  if (!runIdArg) {
     throw new Error("Missing run id.");
   }
 
   const { Storage } = await import("./storage.js");
   const storage = new Storage();
   try {
+    const runId = storage.resolveRunId(runIdArg);
     const result = storage.approveRun(runId);
     if (result.status === "not_found") {
       throw new Error("run-id not found");
     }
     if (result.status === "already_baseline") {
-      console.log(`Already the baseline for scenario ${result.run.scenarioId}`);
+      console.log();
+      console.log(`  ${badge.approved()}  Already the baseline for ${style.cyan(result.run.scenarioId)}`);
+      console.log(`  ${style.dim(result.run.id)}`);
+      console.log();
       return;
     }
-    console.log(`Approved baseline for scenario ${result.run.scenarioId}`);
+    console.log();
+    console.log(boxed(
+      `${badge.approved()}  Baseline set!\n\n  ${style.bold(result.run.scenarioId)}\n  ${style.dim(result.run.id)}`,
+      "blue",
+    ));
   } finally {
     storage.close();
   }
 }
 
 export function printRunComparison(comparison: import("./types.js").RunComparison): void {
-  console.log(`Scenario: ${comparison.baseline.run.scenarioId}`);
-  console.log(`Baseline: ${comparison.baseline.run.id} (${comparison.baseline.run.status.toUpperCase()} ${comparison.baseline.run.score}/100)`);
-  console.log(`Candidate: ${comparison.candidate.run.id} (${comparison.candidate.run.status.toUpperCase()} ${comparison.candidate.run.score}/100)`);
-  console.log(`Classification: ${comparison.classification.toUpperCase()}`);
-  console.log("Changes:");
-  if (comparison.notes.length === 0) {
-    console.log("- No material changes.");
-  } else {
-    for (const note of comparison.notes) {
-      console.log(`- ${note}`);
-    }
+  const behaviorRegressed =
+    comparison.baseline.run.status !== comparison.candidate.run.status ||
+    comparison.candidate.run.score < comparison.baseline.run.score ||
+    comparison.evaluatorDiffs.some((diff) => diff.hardGate && diff.baselineStatus === "pass" && diff.candidateStatus === "fail");
+  const displayClassification = comparison.classification === "regressed" && !behaviorRegressed ? "changed_non_terminal" : comparison.classification;
+
+  console.log();
+  if (comparison.classification === "regressed" && behaviorRegressed) {
+    console.log(boxed(`${badge.regression()}  Regression detected\n\n  ${comparison.baseline.run.scenarioId}`, "red"));
+  } else if (displayClassification === "improved") {
+    console.log(boxed(`${badge.improved()}  Scores improved\n\n  ${comparison.baseline.run.scenarioId}`, "green"));
   }
 
-  if (comparison.evaluatorDiffs.length > 0) {
-    console.log("Evaluator diffs:");
-    for (const diff of comparison.evaluatorDiffs) {
-      console.log(`- ${diff.note}`);
-    }
-  }
-
-  if (comparison.toolDiffs.length > 0) {
-    console.log("Tool diffs:");
-    for (const diff of comparison.toolDiffs) {
-      console.log(`- ${diff.note}`);
-    }
-  }
-
+  const baseStatus = statusBadge(comparison.baseline.run.status);
+  const candStatus = statusBadge(comparison.candidate.run.status);
   const scoreDelta = comparison.candidate.run.score - comparison.baseline.run.score;
-  if (scoreDelta > 0) {
-    console.log(`Score improved ${comparison.baseline.run.score} -> ${comparison.candidate.run.score} -- your agent got better.`);
-  } else if (!["regressed", "unchanged_fail"].includes(comparison.classification)) {
-    console.log("No regressions detected.");
+  const deltaStr = scoreDelta > 0 ? style.green(`+${scoreDelta}`) : scoreDelta < 0 ? style.red(`${scoreDelta}`) : style.dim("±0");
+
+  console.log(`  ${style.muted("Scenario")}   ${style.bold(comparison.baseline.run.scenarioId)}`);
+  console.log(`  ${style.muted("Baseline")}   ${baseStatus}  ${scoreBar(comparison.baseline.run.score, 12)}  ${style.dim(comparison.baseline.run.id)}`);
+  console.log(`  ${style.muted("Candidate")}  ${candStatus}  ${scoreBar(comparison.candidate.run.score, 12)}  ${style.dim(comparison.candidate.run.id)}`);
+  console.log(`  ${style.muted("Score Δ")}    ${deltaStr}`);
+  console.log();
+
+  if (comparison.notes.length > 0 || comparison.evaluatorDiffs.length > 0 || comparison.toolDiffs.length > 0) {
+    console.log(sectionHeader("Changes"));
+    for (const note of comparison.notes) {
+      console.log(`    ${style.muted("·")} ${note}`);
+    }
+    for (const diff of comparison.evaluatorDiffs) {
+      const icon = diff.baselineStatus === "pass" && diff.candidateStatus === "fail" ? style.red("✗") : style.green("✓");
+      console.log(`    ${icon} ${diff.note}`);
+    }
+    for (const diff of comparison.toolDiffs) {
+      console.log(`    ${style.yellow("~")} ${diff.note}`);
+    }
+  } else {
+    console.log(`    ${style.dim("No material changes.")}`);
   }
+
+  console.log();
+  if (scoreDelta > 0) {
+    console.log(`  ${style.green("✓")} Score improved ${comparison.baseline.run.score} → ${comparison.candidate.run.score} — your agent got better!`);
+  } else if (!["unchanged_fail"].includes(comparison.classification) && !behaviorRegressed) {
+    console.log(`  ${style.green("✓")} No regressions detected.`);
+  }
+  console.log();
+}
+
+function statusBadge(status: import("./types.js").RunStatus): string {
+  if (status === "pass") return badge.pass();
+  if (status === "error") return badge.error();
+  return badge.fail();
 }
 
 function signedMetric(value: number): string {
