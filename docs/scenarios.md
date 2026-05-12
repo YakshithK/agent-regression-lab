@@ -540,6 +540,32 @@ This workflow replaces manual run-ID tracking. Use it for:
 
 ---
 
+## Generated Scenarios
+
+Use `agentlab generate` to bootstrap scenario YAML from the built-in template catalog:
+
+```bash
+agentlab generate --domain support --count 5 --agent mock-default
+```
+
+Generated scenarios are written to `scenarios/<domain>/generated-*.yaml`. The catalog covers `support`, `coding`, `research`, `ops`, and `general`.
+
+Generated files include `# TODO` markers in evaluator comments. The scenarios are runnable immediately with the mock agent, but before using them with a real agent you should replace the expected substrings with phrases your agent should always include.
+
+The templates default to `final_answer_contains` because it is a substring match. That is usually better than exact output matching for non-deterministic agents.
+
+Recommended flow:
+
+```bash
+agentlab generate --domain support --count 5 --agent my-agent
+# edit TODO expectations
+agentlab run support.generated-happy-path --agent my-agent
+agentlab approve @last
+agentlab compare @prev @last
+```
+
+---
+
 ## Authoring Conventions
 
 - `id` format: `<suite>.<short-name>`
