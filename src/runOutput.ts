@@ -1,4 +1,5 @@
 import type { RunBundle } from "./types.js";
+import { boxedError } from "./cliStyle.js";
 
 export function getRunErrorDetail(bundle: RunBundle): string | undefined {
   for (const event of [...bundle.traceEvents].reverse()) {
@@ -23,10 +24,20 @@ export function getRunErrorDetail(bundle: RunBundle): string | undefined {
 
 export function formatCliErrorMessage(message: string): string {
   if (message.includes("database is locked")) {
-    return "SQLite database is locked. Retry the run sequentially or wait for the current run to finish.";
+    return boxedError(
+      "SQLite database is locked. Retry the run sequentially or wait for the current run to finish.\n\n" +
+        "Run: agentlab run <scenario-id>",
+    );
   }
 
-  return message;
+  return boxedError(ensureFixCommand(message));
+}
+
+function ensureFixCommand(message: string): string {
+  if (/^Run: /m.test(message)) {
+    return message;
+  }
+  return `${message}\n\nRun: agentlab help`;
 }
 
 export function getFailedEvaluatorSummaries(bundle: RunBundle): string[] {
