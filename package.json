@@ -1,8 +1,8 @@
 {
   "name": "agent-regression-lab",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": false,
-  "description": "Local-first scenario-based evaluation harness for AI agents.",
+  "description": "Regression testing for AI agents — catch prompt and behavior changes before they ship.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -15,9 +15,18 @@
   "keywords": [
     "ai",
     "agent",
+    "regression",
+    "testing",
     "evaluation",
     "cli",
-    "regression"
+    "pytest",
+    "llm",
+    "openai",
+    "anthropic",
+    "claude",
+    "prompt-testing",
+    "agent-testing",
+    "evals"
   ],
   "type": "module",
   "bin": {
