@@ -2,6 +2,12 @@
 
 All notable changes to Agent Regression Lab are documented here.
 
+## [0.7.1] - 2026-05-13
+
+### Changed
+- npm package description updated to "Regression testing for AI agents — catch prompt and behavior changes before they ship."
+- npm keywords expanded for discoverability (added: pytest, llm, openai, anthropic, claude, prompt-testing, agent-testing, evals).
+
 ## [0.7.0] - 2026-05-12
 
 ### Added
