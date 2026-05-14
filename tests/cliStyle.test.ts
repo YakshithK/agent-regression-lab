@@ -7,11 +7,12 @@ import test, { describe } from "node:test";
 // Force non-TTY for all tests in this module.
 const originalIsTTY = process.stdout.isTTY;
 const originalStderrIsTTY = process.stderr.isTTY;
+const originalNoColor = process.env.NO_COLOR;
+const originalForceColor = process.env.FORCE_COLOR;
 
 // Patch before importing so the module sees NO_COLOR set
 process.env.NO_COLOR = "1";
-
-import {
+const {
   badge,
   boxed,
   boxedError,
@@ -23,7 +24,7 @@ import {
   sectionHeader,
   style,
   withSpinner,
-} from "../src/cliStyle.js";
+} = await import("../src/cliStyle.js");
 
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
@@ -36,6 +37,28 @@ function stripAnsi(str: string): string {
 describe("colorEnabled", () => {
   test("returns false when NO_COLOR is set", () => {
     assert.equal(colorEnabled(), false);
+  });
+
+  test("treats FORCE_COLOR=0 as disabled", () => {
+    delete process.env.NO_COLOR;
+    process.env.FORCE_COLOR = "0";
+    try {
+      assert.equal(colorEnabled({ isTTY: true } as NodeJS.WriteStream), false);
+    } finally {
+      process.env.NO_COLOR = "1";
+      delete process.env.FORCE_COLOR;
+    }
+  });
+
+  test("treats FORCE_COLOR=1 as enabled", () => {
+    delete process.env.NO_COLOR;
+    process.env.FORCE_COLOR = "1";
+    try {
+      assert.equal(colorEnabled({ isTTY: false } as NodeJS.WriteStream), true);
+    } finally {
+      process.env.NO_COLOR = "1";
+      delete process.env.FORCE_COLOR;
+    }
   });
 });
 
@@ -182,7 +205,16 @@ describe("withSpinner", () => {
 
 // Restore env after tests
 test("cleanup: restore env", () => {
-  delete process.env.NO_COLOR;
+  if (originalNoColor === undefined) {
+    delete process.env.NO_COLOR;
+  } else {
+    process.env.NO_COLOR = originalNoColor;
+  }
+  if (originalForceColor === undefined) {
+    delete process.env.FORCE_COLOR;
+  } else {
+    process.env.FORCE_COLOR = originalForceColor;
+  }
   (process.stdout as { isTTY?: boolean }).isTTY = originalIsTTY;
   (process.stderr as { isTTY?: boolean }).isTTY = originalStderrIsTTY;
   assert.ok(true);

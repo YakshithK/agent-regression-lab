@@ -12,6 +12,14 @@ test("printRunComparison celebrates score improvements", () => {
   assert.match(lines.join("\n"), /Score improved 60 .+ 100/);
 });
 
+test("printRunComparison shows ERROR badge for errored runs", () => {
+  const lines = captureConsole(() => {
+    printRunComparison(makeComparison(60, 50, "changed_non_terminal", "error", "pass"));
+  });
+
+  assert.match(lines.join("\n"), /ERROR/);
+});
+
 function captureConsole(fn: () => void): string[] {
   const original = console.log;
   const lines: string[] = [];
@@ -26,9 +34,15 @@ function captureConsole(fn: () => void): string[] {
   }
 }
 
-function makeComparison(baselineScore: number, candidateScore: number, classification: RunComparison["classification"]): RunComparison {
-  const baseline = makeBundle("run_base", baselineScore, "fail");
-  const candidate = makeBundle("run_candidate", candidateScore, "pass");
+function makeComparison(
+  baselineScore: number,
+  candidateScore: number,
+  classification: RunComparison["classification"],
+  baselineStatus: RunBundle["run"]["status"] = "fail",
+  candidateStatus: RunBundle["run"]["status"] = "pass",
+): RunComparison {
+  const baseline = makeBundle("run_base", baselineScore, baselineStatus);
+  const candidate = makeBundle("run_candidate", candidateScore, candidateStatus);
   return {
     baseline,
     candidate,

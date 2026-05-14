@@ -3,7 +3,20 @@ import chalk from "chalk";
 import ora from "ora";
 
 export function colorEnabled(stream: NodeJS.WriteStream = process.stdout): boolean {
-  return Boolean((stream.isTTY || process.env.FORCE_COLOR) && !process.env.NO_COLOR);
+  if (process.env.NO_COLOR) return false;
+  const forced = forcedColorEnabled();
+  if (forced !== undefined) return forced;
+  return Boolean(stream.isTTY);
+}
+
+function forcedColorEnabled(): boolean | undefined {
+  const forceColor = process.env.FORCE_COLOR;
+  if (forceColor === undefined) return undefined;
+  return forceColor !== "0";
+}
+
+function spinnerEnabled(stream: NodeJS.WriteStream = process.stdout): boolean {
+  return Boolean(stream.isTTY);
 }
 
 // Gradient text: interpolates between two hex colors across the string
@@ -144,7 +157,7 @@ function longestLine(message: string): number {
 }
 
 export async function withSpinner<T>(message: string, fn: () => Promise<T>): Promise<T> {
-  if (!colorEnabled()) {
+  if (!spinnerEnabled(process.stdout)) {
     return await fn();
   }
 
@@ -163,5 +176,4 @@ export async function withSpinner<T>(message: string, fn: () => Promise<T>): Pro
     throw error;
   }
 }
-
 
